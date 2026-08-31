@@ -121,13 +121,13 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: no linked or installed Foundry VTT v14 test environment/world was available for the required GM/player hidden-token smoke check; automated Foundry-shaped security coverage passed.
 
 ### P11 — Tactical update service
-- [ ] Sole state-writing service.
-- [ ] Partial X/Y/elevation/rotation/pitch updates.
-- [ ] Pre-write permission checks.
-- [ ] Interaction-start field snapshots.
-- [ ] Same-field stale-edit cancellation.
-- [ ] Unrelated-field concurrent updates coexist.
-- [ ] No render/hook code writes.
+- [x] Sole state-writing service.
+- [x] Partial X/Y/elevation/rotation/pitch updates.
+- [x] Pre-write permission checks.
+- [x] Interaction-start field snapshots.
+- [x] Same-field stale-edit cancellation.
+- [x] Unrelated-field concurrent updates coexist.
+- [x] No render/hook code writes.
 
 ### P12 — Hook/event coordinator
 - [ ] `moveToken` listener.

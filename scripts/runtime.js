@@ -14,6 +14,7 @@ import { SceneEligibilityService } from "./scene-eligibility.js";
 import { getSceneEnabled, setSceneEnabled } from "./scene-flags.js";
 import { registerSettings } from "./settings.js";
 import { TacticalStateService } from "./tactical-state-service.js";
+import { TacticalUpdateService } from "./tactical-update-service.js";
 import { VisibilityService } from "./visibility-service.js";
 import { VIEW_REGISTRY } from "./view-registry.js";
 
@@ -34,7 +35,8 @@ export function createRuntime({
   currentUser,
   visibilityService,
   permissionService,
-  tacticalStateService
+  tacticalStateService,
+  tacticalUpdateService
 } = {}) {
   let initialized = false;
   const services = new Map();
@@ -59,12 +61,19 @@ export function createRuntime({
     visibilityService: resolvedVisibilityService,
     permissionService: resolvedPermissionService
   });
+  const resolvedTacticalUpdateService = tacticalUpdateService ?? new TacticalUpdateService({
+    coordinateAdapter: resolvedCoordinateAdapter,
+    elevationAdapter: resolvedElevationAdapter,
+    orientationAdapter,
+    permissionService: resolvedPermissionService
+  });
   const resolvedPersistenceService = persistenceService ?? new PersistenceService({ settings });
   services.set("orientationAdapter", orientationAdapter);
   services.set("coordinateAdapter", resolvedCoordinateAdapter);
   services.set("elevationAdapter", resolvedElevationAdapter);
   services.set("tacticalTokenState", resolvedTacticalTokenState);
   services.set("tacticalState", resolvedTacticalStateService);
+  services.set("tacticalUpdate", resolvedTacticalUpdateService);
   services.set("visibility", resolvedVisibilityService);
   services.set("permission", resolvedPermissionService);
   services.set("projectionEngine", projectionEngine);
@@ -140,6 +149,7 @@ export function createModuleApi(runtime) {
     getTacticalStateService: () => runtime.getService("tacticalState"),
     getVisibilityService: () => runtime.getService("visibility"),
     getPermissionService: () => runtime.getService("permission"),
+    getTacticalUpdateService: () => runtime.getService("tacticalUpdate"),
     getProjectionEngine: () => runtime.getService("projectionEngine"),
     projectPoint: (...args) => runtime.getService("projectionEngine").projectPoint(...args),
     projectVector: (...args) => runtime.getService("projectionEngine").projectVector(...args),
@@ -161,6 +171,11 @@ export function createModuleApi(runtime) {
     getVisibleTacticalStates: (scene, options) => runtime
       .getService("tacticalState")
       .getVisibleTacticalStates(scene, options),
+    moveXY: (...args) => runtime.getService("tacticalUpdate").moveXY(...args),
+    moveXZ: (...args) => runtime.getService("tacticalUpdate").moveXZ(...args),
+    moveYZ: (...args) => runtime.getService("tacticalUpdate").moveYZ(...args),
+    setHeading: (...args) => runtime.getService("tacticalUpdate").setHeading(...args),
+    setPitch: (...args) => runtime.getService("tacticalUpdate").setPitch(...args),
     isSceneEligible: (scene) => runtime.isSceneEligible(scene),
     isSceneEnabled: (scene) => runtime.isSceneEnabled(scene),
     setSceneEnabled: (scene, enabled) => runtime.setSceneEnabled(scene, enabled)
