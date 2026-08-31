@@ -67,12 +67,13 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: no linked or installed Foundry VTT v14 test environment was available for this workspace; automated Foundry-shaped fixtures and diagnostic integration coverage passed.
 
 ### P05 — Elevation/Z adapter
-- [ ] Convert elevation <-> tactical Z.
-- [ ] Preserve negative elevation.
-- [ ] Detect off-step elevation.
-- [ ] Define user-initiated tactical Z snapping behavior.
-- [ ] Test multiple grid distances.
-- [ ] Complete real Foundry coordinate Gate 1.
+- [x] Convert elevation <-> tactical Z.
+- [x] Preserve negative elevation.
+- [x] Detect off-step elevation.
+- [x] Define user-initiated tactical Z snapping behavior.
+- [x] Test multiple grid distances.
+- [!] Complete real Foundry coordinate Gate 1.
+  - Blocked: no linked or installed Foundry VTT v14 test environment was available for this workspace; no real-API discrepancy could be assessed.
 
 ---
 

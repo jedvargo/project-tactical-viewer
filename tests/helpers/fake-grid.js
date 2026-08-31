@@ -72,7 +72,8 @@ export function makeToken({
   y,
   width = 1,
   height = 1,
+  elevation = 0,
   id = "token"
 }) {
-  return { id, x, y, width, height };
+  return { id, x, y, width, height, elevation };
 }

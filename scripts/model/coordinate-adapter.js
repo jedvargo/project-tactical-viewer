@@ -1,4 +1,5 @@
 import { SceneEligibilityService } from "../scene-eligibility.js";
+import { ElevationAdapter } from "./elevation-adapter.js";
 
 const EPSILON = 1e-9;
 
@@ -46,13 +47,18 @@ function tokenData(token) {
   if (!positiveNumber(width) || !positiveNumber(height)) {
     throw new TypeError("TokenDocument width and height must be positive grid dimensions");
   }
+  const elevation = data.elevation ?? 0;
+  if (!finiteNumber(elevation)) {
+    throw new TypeError("TokenDocument elevation must be a finite Scene-distance value");
+  }
 
   return {
     id: data.id ?? token.id,
     x: data.x,
     y: data.y,
     width,
-    height
+    height,
+    elevation
   };
 }
 
@@ -92,10 +98,12 @@ export class CoordinateAdapterError extends Error {
 export class CoordinateAdapter {
   constructor({
     eligibilityService = new SceneEligibilityService(),
-    gridProvider = defaultGridProvider
+    gridProvider = defaultGridProvider,
+    elevationAdapter = new ElevationAdapter()
   } = {}) {
     this.eligibilityService = eligibilityService;
     this.gridProvider = gridProvider;
+    this.elevationAdapter = elevationAdapter;
   }
 
   resolveGrid(scene, explicitGrid) {
@@ -167,6 +175,7 @@ export class CoordinateAdapter {
       (anchor.x - firstCellCenter.x) / sizeX + 0.5,
       (anchor.y - firstCellCenter.y) / sizeY + 0.5
     );
+    const elevationMetadata = this.elevationAdapter.describe(data.elevation, grid.distance);
 
     return Object.freeze({
       tokenId: data.id,
@@ -176,12 +185,38 @@ export class CoordinateAdapter {
       centerY: anchor.y,
       tacticalX: anchorTactical.x,
       tacticalY: anchorTactical.y,
+      elevation: elevationMetadata.elevation,
+      tacticalZ: elevationMetadata.tacticalZ,
+      elevationOnGrid: elevationMetadata.onGrid,
+      elevationOffGrid: elevationMetadata.offGrid,
+      offGrid: elevationMetadata.offGrid,
+      elevationMetadata,
       topLeft: freezePoint(data.x, data.y),
       canonicalTopLeft: freezePoint(canonicalTopLeft.x, canonicalTopLeft.y),
       topLeftOffset,
       width: data.width,
       height: data.height
     });
+  }
+
+  toTacticalZ(elevation, sceneOrDistance) {
+    return this.elevationAdapter.toTacticalZ(elevation, sceneOrDistance);
+  }
+
+  toElevation(tacticalZ, sceneOrDistance) {
+    return this.elevationAdapter.toElevation(tacticalZ, sceneOrDistance);
+  }
+
+  isElevationOnGrid(elevation, sceneOrDistance) {
+    return this.elevationAdapter.isElevationOnGrid(elevation, sceneOrDistance);
+  }
+
+  moveElevationByTacticalDelta(elevation, deltaZ, sceneOrDistance) {
+    return this.elevationAdapter.moveElevationByTacticalDelta(
+      elevation,
+      deltaZ,
+      sceneOrDistance
+    );
   }
 
   /**

@@ -30,7 +30,17 @@ describe("Prompt 04 coordinate runtime integration", () => {
       centerY: 475,
       tacticalX: 3,
       tacticalY: 4,
+      elevation: 0,
+      tacticalZ: 0,
       anchorTactical: { x: 3, y: 4 }
     });
+  });
+
+  it("exposes the canonical elevation adapter through the runtime API", () => {
+    const runtime = createRuntime();
+    const api = createModuleApi(runtime);
+
+    expect(api.getElevationAdapter()).toBe(runtime.getService("elevationAdapter"));
+    expect(api.getElevationForTacticalZ(-2, 5)).toBe(-10);
   });
 });

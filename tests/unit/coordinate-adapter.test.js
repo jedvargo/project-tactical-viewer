@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CoordinateAdapter } from "../../scripts/model/coordinate-adapter.js";
 import {
@@ -124,5 +124,100 @@ describe("CoordinateAdapter", () => {
       grid: { type: "square", size: 100, sizeX: 100, sizeY: 120, distance: 5 },
       dimensions: { width: 100, height: 100 }
     })).toThrowError(/positive grid pixel size/);
+  });
+
+  it.each([1, 5, 10, 100])("converts elevation to tactical Z at grid distance %d", (distance) => {
+    const grid = createFakeSquareGrid({ distance });
+    const scene = makeSquareScene(grid);
+    const adapter = new CoordinateAdapter();
+    const token = makeToken({ x: 0, y: 0, elevation: -2 * distance });
+
+    expect(adapter.toTactical(token, scene)).toMatchObject({
+      elevation: -2 * distance,
+      tacticalZ: -2,
+      elevationOnGrid: true,
+      elevationOffGrid: false
+    });
+  });
+
+  it.each([
+    [-10, 5, -2],
+    [0, 5, 0],
+    [15, 5, 3],
+    [7.5, 5, 1.5]
+  ])("preserves elevation %d and reports tactical Z %d at distance %d", (elevation, distance, tacticalZ) => {
+    const grid = createFakeSquareGrid({ distance });
+    const scene = makeSquareScene(grid);
+    const adapter = new CoordinateAdapter();
+    const token = makeToken({ x: 0, y: 0, elevation });
+
+    const state = adapter.toTactical(token, scene);
+
+    expect(state.elevation).toBe(elevation);
+    expect(state.tacticalZ).toBe(tacticalZ);
+    expect(state.elevationMetadata).toMatchObject({
+      gridDistance: distance,
+      onGrid: elevation % distance === 0,
+      offGrid: elevation % distance !== 0
+    });
+  });
+
+  it("converts tactical Z back to Foundry elevation without losing negative values", () => {
+    const adapter = new CoordinateAdapter();
+
+    expect(adapter.toElevation(-3, 5)).toBe(-15);
+    expect(adapter.toElevation(0, 10)).toBe(0);
+    expect(adapter.toElevation(2.5, 100)).toBe(250);
+  });
+
+  it("round-trips on-grid elevations across all supported grid distances", () => {
+    const adapter = new CoordinateAdapter();
+
+    for (const distance of [1, 5, 10, 100]) {
+      for (const tacticalZ of [-7, 0, 4, 12]) {
+        const elevation = tacticalZ * distance;
+        expect(adapter.toElevation(adapter.toTacticalZ(elevation, distance), distance))
+          .toBe(tacticalZ * distance);
+      }
+    }
+  });
+
+  it("treats floating-point residue within the documented tolerance as on-grid", () => {
+    const grid = createFakeSquareGrid({ distance: 5 });
+    const scene = makeSquareScene(grid);
+    const adapter = new CoordinateAdapter();
+    const token = makeToken({ x: 0, y: 0, elevation: 15 + 1e-10 });
+
+    expect(adapter.toTactical(token, scene).elevationOnGrid).toBe(true);
+  });
+
+  it("does not rewrite an off-grid document when reading tactical state", () => {
+    const grid = createFakeSquareGrid({ distance: 5 });
+    const scene = makeSquareScene(grid);
+    const token = makeToken({ x: 0, y: 0, elevation: 7.5 });
+    token.update = vi.fn();
+    const adapter = new CoordinateAdapter();
+
+    const state = adapter.toTactical(token, scene);
+
+    expect(state.elevationOffGrid).toBe(true);
+    expect(token.elevation).toBe(7.5);
+    expect(token.update).not.toHaveBeenCalled();
+  });
+
+  it("snaps an off-step starting elevation before applying a tactical vertical move", () => {
+    const adapter = new CoordinateAdapter();
+
+    expect(adapter.moveElevationByTacticalDelta(7.5, 1, 5)).toBe(15);
+    expect(adapter.moveElevationByTacticalDelta(7.5, -1, 5)).toBe(5);
+    expect(adapter.moveElevationByTacticalDelta(-7.5, 1, 5)).toBe(0);
+  });
+
+  it("rejects non-positive grid distance for every elevation conversion", () => {
+    const adapter = new CoordinateAdapter();
+
+    expect(() => adapter.toTacticalZ(1, 0)).toThrowError(/positive grid distance/);
+    expect(() => adapter.toElevation(1, -5)).toThrowError(/positive grid distance/);
+    expect(() => adapter.isElevationOnGrid(1, Number.NaN)).toThrowError(/positive grid distance/);
   });
 });

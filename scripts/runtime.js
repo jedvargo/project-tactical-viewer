@@ -4,6 +4,7 @@ import {
 } from "./constants.js";
 import { CoordinateAdapter } from "./model/coordinate-adapter.js";
 import { chebyshevDistance3d } from "./model/distance.js";
+import { ElevationAdapter } from "./model/elevation-adapter.js";
 import { OrientationAdapter } from "./model/orientation-adapter.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
 import { getSceneEnabled, setSceneEnabled } from "./scene-flags.js";
@@ -18,17 +19,23 @@ export function createRuntime({
   viewRegistry = VIEW_REGISTRY,
   orientationAdapter = new OrientationAdapter(),
   coordinateAdapter,
+  elevationAdapter,
   distance = chebyshevDistance3d,
   settings
 } = {}) {
   let initialized = false;
   const services = new Map();
   const sceneEligibility = new SceneEligibilityService();
+  const resolvedElevationAdapter = elevationAdapter
+    ?? coordinateAdapter?.elevationAdapter
+    ?? new ElevationAdapter();
   const resolvedCoordinateAdapter = coordinateAdapter ?? new CoordinateAdapter({
-    eligibilityService: sceneEligibility
+    eligibilityService: sceneEligibility,
+    elevationAdapter: resolvedElevationAdapter
   });
   services.set("orientationAdapter", orientationAdapter);
   services.set("coordinateAdapter", resolvedCoordinateAdapter);
+  services.set("elevationAdapter", resolvedElevationAdapter);
   services.set("distance", distance);
   services.set("sceneEligibility", sceneEligibility);
   services.set("settings", settings);
@@ -94,7 +101,14 @@ export function createModuleApi(runtime) {
     getViewRegistry: () => runtime.viewRegistry,
     getOrientationAdapter: () => runtime.getService("orientationAdapter"),
     getCoordinateAdapter: () => runtime.getService("coordinateAdapter"),
+    getElevationAdapter: () => runtime.getService("elevationAdapter"),
     getDistance: (...deltas) => runtime.getService("distance")(...deltas),
+    getElevationForTacticalZ: (...args) => runtime
+      .getService("coordinateAdapter")
+      .toElevation(...args),
+    moveElevationByTacticalDelta: (...args) => runtime
+      .getService("coordinateAdapter")
+      .moveElevationByTacticalDelta(...args),
     getTacticalState: (token, scene, options) => runtime
       .getService("coordinateAdapter")
       .toTactical(token, scene, options),
