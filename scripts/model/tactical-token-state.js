@@ -4,6 +4,8 @@ import {
   getTacticalTokenFlags,
   getTokenPitch
 } from "./token-flags.js";
+import { PermissionService } from "../permission-service.js";
+import { VisibilityService } from "../visibility-service.js";
 
 function documentData(tokenDocument) {
   const data = tokenDocument?.document ?? tokenDocument;
@@ -35,10 +37,14 @@ function displayPitch(value, orientationAdapter) {
 export class TacticalTokenState {
   constructor({
     coordinateAdapter = new CoordinateAdapter(),
-    orientationAdapter = new OrientationAdapter()
+    orientationAdapter = new OrientationAdapter(),
+    visibilityService = new VisibilityService(),
+    permissionService = new PermissionService()
   } = {}) {
     this.coordinateAdapter = coordinateAdapter;
     this.orientationAdapter = orientationAdapter;
+    this.visibilityService = visibilityService;
+    this.permissionService = permissionService;
   }
 
   build(tokenDocument, scene, options = {}) {
@@ -54,6 +60,8 @@ export class TacticalTokenState {
       ? data.rotation
       : 0;
     const depth = positiveDimension(data.depth);
+    const visibleToCurrentUser = this.visibilityService.isVisible(tokenDocument, options);
+    const capabilities = this.permissionService.getCapabilities(tokenDocument);
 
     return Object.freeze({
       tokenId: idOf(data) ?? idOf(tokenDocument),
@@ -78,9 +86,12 @@ export class TacticalTokenState {
       participating: flags.enabled,
       schemaVersion: flags.schemaVersion,
       art: flags.art,
-      // Prompt 10 supplies authoritative visibility/permission services.
-      visibleToCurrentUser: null,
-      canCurrentUserUpdate: null
+      visibleToCurrentUser,
+      canCurrentUserUpdate: capabilities.canUpdate,
+      canCurrentUserMove: capabilities.canMove,
+      canCurrentUserRotate: capabilities.canRotate,
+      locked: capabilities.locked,
+      lockRotation: capabilities.lockRotation
     });
   }
 

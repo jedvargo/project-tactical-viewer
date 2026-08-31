@@ -7,11 +7,14 @@ import { chebyshevDistance3d } from "./model/distance.js";
 import { ElevationAdapter } from "./model/elevation-adapter.js";
 import { OrientationAdapter } from "./model/orientation-adapter.js";
 import { TacticalTokenState } from "./model/tactical-token-state.js";
+import { PermissionService } from "./permission-service.js";
 import { ProjectionEngine } from "./projection/projection-engine.js";
 import { PersistenceService } from "./persistence/user-layouts.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
 import { getSceneEnabled, setSceneEnabled } from "./scene-flags.js";
 import { registerSettings } from "./settings.js";
+import { TacticalStateService } from "./tactical-state-service.js";
+import { VisibilityService } from "./visibility-service.js";
 import { VIEW_REGISTRY } from "./view-registry.js";
 
 /**
@@ -27,7 +30,11 @@ export function createRuntime({
   projectionEngine = new ProjectionEngine(),
   distance = chebyshevDistance3d,
   settings,
-  persistenceService
+  persistenceService,
+  currentUser,
+  visibilityService,
+  permissionService,
+  tacticalStateService
 } = {}) {
   let initialized = false;
   const services = new Map();
@@ -39,15 +46,27 @@ export function createRuntime({
     eligibilityService: sceneEligibility,
     elevationAdapter: resolvedElevationAdapter
   });
+  const resolvedVisibilityService = visibilityService ?? new VisibilityService({ currentUser });
+  const resolvedPermissionService = permissionService ?? new PermissionService({ currentUser });
   const resolvedTacticalTokenState = tacticalTokenState ?? new TacticalTokenState({
     coordinateAdapter: resolvedCoordinateAdapter,
-    orientationAdapter
+    orientationAdapter,
+    visibilityService: resolvedVisibilityService,
+    permissionService: resolvedPermissionService
+  });
+  const resolvedTacticalStateService = tacticalStateService ?? new TacticalStateService({
+    tacticalTokenState: resolvedTacticalTokenState,
+    visibilityService: resolvedVisibilityService,
+    permissionService: resolvedPermissionService
   });
   const resolvedPersistenceService = persistenceService ?? new PersistenceService({ settings });
   services.set("orientationAdapter", orientationAdapter);
   services.set("coordinateAdapter", resolvedCoordinateAdapter);
   services.set("elevationAdapter", resolvedElevationAdapter);
   services.set("tacticalTokenState", resolvedTacticalTokenState);
+  services.set("tacticalState", resolvedTacticalStateService);
+  services.set("visibility", resolvedVisibilityService);
+  services.set("permission", resolvedPermissionService);
   services.set("projectionEngine", projectionEngine);
   services.set("distance", distance);
   services.set("persistence", resolvedPersistenceService);
@@ -118,6 +137,9 @@ export function createModuleApi(runtime) {
     getCoordinateAdapter: () => runtime.getService("coordinateAdapter"),
     getElevationAdapter: () => runtime.getService("elevationAdapter"),
     getTacticalTokenState: () => runtime.getService("tacticalTokenState"),
+    getTacticalStateService: () => runtime.getService("tacticalState"),
+    getVisibilityService: () => runtime.getService("visibility"),
+    getPermissionService: () => runtime.getService("permission"),
     getProjectionEngine: () => runtime.getService("projectionEngine"),
     projectPoint: (...args) => runtime.getService("projectionEngine").projectPoint(...args),
     projectVector: (...args) => runtime.getService("projectionEngine").projectVector(...args),
@@ -134,8 +156,11 @@ export function createModuleApi(runtime) {
     getPersistenceService: () => runtime.getService("persistence"),
     getUserPreferences: () => runtime.getService("persistence").getPreferences(),
     getTacticalState: (token, scene, options) => runtime
-      .getService("tacticalTokenState")
-      .build(token, scene, options),
+      .getService("tacticalState")
+      .getVisibleTacticalState(token, scene, options),
+    getVisibleTacticalStates: (scene, options) => runtime
+      .getService("tacticalState")
+      .getVisibleTacticalStates(scene, options),
     isSceneEligible: (scene) => runtime.isSceneEligible(scene),
     isSceneEnabled: (scene) => runtime.isSceneEnabled(scene),
     setSceneEnabled: (scene, enabled) => runtime.setSceneEnabled(scene, enabled)

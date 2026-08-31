@@ -112,12 +112,13 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] Runtime uses computed TacticalTokenState.
 
 ### P10 — Visibility/permission security service
-- [ ] Current-user visibility filter.
-- [ ] Permission/update capability.
-- [ ] Locked and rotation-lock handling.
-- [ ] No hidden metadata leaks.
-- [ ] Add security regression tests.
-- [ ] Real Foundry visibility Gate 2 partial test.
+- [x] Current-user visibility filter.
+- [x] Permission/update capability.
+- [x] Locked and rotation-lock handling.
+- [x] No hidden metadata leaks.
+- [x] Add security regression tests.
+- [!] Real Foundry visibility Gate 2 partial test.
+  - Blocked: no linked or installed Foundry VTT v14 test environment/world was available for the required GM/player hidden-token smoke check; automated Foundry-shaped security coverage passed.
 
 ### P11 — Tactical update service
 - [ ] Sole state-writing service.
