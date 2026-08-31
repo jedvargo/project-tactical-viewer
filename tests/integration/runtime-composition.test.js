@@ -5,7 +5,9 @@ import {
   getModuleApi,
   getRuntime
 } from "../../scripts/main.js";
+import { createModuleApi, createRuntime } from "../../scripts/runtime.js";
 import { createFakeFoundryHooks } from "../helpers/fake-foundry.js";
+import { USER_LAYOUT_SETTING_KEY } from "../../scripts/persistence/user-layouts.js";
 
 describe("runtime composition root", () => {
   it("initializes exactly once and exposes diagnostics after init", () => {
@@ -54,5 +56,36 @@ describe("runtime composition root", () => {
     expect(Object.isFrozen(api)).toBe(true);
     expect(Object.isFrozen(api.getDiagnostics())).toBe(true);
     expect(api.setRuntime).toBeUndefined();
+  });
+
+  it("initializes and exposes validated user defaults through PersistenceService", () => {
+    const rawLayout = {
+      schemaVersion: 1,
+      defaultPanelCount: 2,
+      linkSelection: false,
+      scenes: {}
+    };
+    const settings = {
+      get: vi.fn((namespace, key) => {
+        expect(namespace).toBe("tactical-3d-viewer");
+        expect(key).toBe(USER_LAYOUT_SETTING_KEY);
+        return rawLayout;
+      }),
+      register: vi.fn()
+    };
+    const runtime = createRuntime({ settings });
+
+    runtime.initialize();
+
+    const persistence = runtime.getService("persistence");
+    expect(persistence.initialized).toBe(true);
+    expect(persistence.getDefaults()).toEqual({
+      panelCount: 2,
+      linkSelection: false,
+      linkCenter: true,
+      linkZoom: true
+    });
+    expect(settings.get).toHaveBeenCalledTimes(1);
+    expect(createModuleApi(runtime).getUserPreferences().schemaVersion).toBe(2);
   });
 });

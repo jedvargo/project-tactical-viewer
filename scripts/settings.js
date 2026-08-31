@@ -1,49 +1,18 @@
 import { MODULE_ID } from "./constants.js";
+import { DEFAULT_USER_LAYOUT } from "./persistence/migrations.js";
+
+export const USER_LAYOUT_SETTING_KEY = "userLayout";
 
 export const SETTING_DEFINITIONS = Object.freeze([
   Object.freeze({
-    key: "defaultPanelCount",
+    key: USER_LAYOUT_SETTING_KEY,
     config: Object.freeze({
-      name: "Default panel count",
-      hint: "The number of Tactical Viewer panels to open by default.",
+      name: "Tactical Viewer layout",
+      hint: "User-local panel layout and per-Scene viewer preferences.",
       scope: "user",
-      config: true,
-      type: Number,
-      default: 1,
-      range: Object.freeze({ min: 1, max: 4, step: 1 })
-    })
-  }),
-  Object.freeze({
-    key: "linkSelection",
-    config: Object.freeze({
-      name: "Link selection",
-      hint: "Keep tactical selection synchronized across this user's panels.",
-      scope: "user",
-      config: true,
-      type: Boolean,
-      default: true
-    })
-  }),
-  Object.freeze({
-    key: "linkCenter",
-    config: Object.freeze({
-      name: "Link center",
-      hint: "Keep the logical tactical center synchronized across this user's panels.",
-      scope: "user",
-      config: true,
-      type: Boolean,
-      default: true
-    })
-  }),
-  Object.freeze({
-    key: "linkZoom",
-    config: Object.freeze({
-      name: "Link zoom",
-      hint: "Keep tactical zoom synchronized across this user's panels.",
-      scope: "user",
-      config: true,
-      type: Boolean,
-      default: true
+      config: false,
+      type: Object,
+      default: DEFAULT_USER_LAYOUT
     })
   }),
   Object.freeze({

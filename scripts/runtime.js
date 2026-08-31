@@ -7,6 +7,7 @@ import { chebyshevDistance3d } from "./model/distance.js";
 import { ElevationAdapter } from "./model/elevation-adapter.js";
 import { OrientationAdapter } from "./model/orientation-adapter.js";
 import { ProjectionEngine } from "./projection/projection-engine.js";
+import { PersistenceService } from "./persistence/user-layouts.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
 import { getSceneEnabled, setSceneEnabled } from "./scene-flags.js";
 import { registerSettings } from "./settings.js";
@@ -23,7 +24,8 @@ export function createRuntime({
   elevationAdapter,
   projectionEngine = new ProjectionEngine(),
   distance = chebyshevDistance3d,
-  settings
+  settings,
+  persistenceService
 } = {}) {
   let initialized = false;
   const services = new Map();
@@ -35,11 +37,13 @@ export function createRuntime({
     eligibilityService: sceneEligibility,
     elevationAdapter: resolvedElevationAdapter
   });
+  const resolvedPersistenceService = persistenceService ?? new PersistenceService({ settings });
   services.set("orientationAdapter", orientationAdapter);
   services.set("coordinateAdapter", resolvedCoordinateAdapter);
   services.set("elevationAdapter", resolvedElevationAdapter);
   services.set("projectionEngine", projectionEngine);
   services.set("distance", distance);
+  services.set("persistence", resolvedPersistenceService);
   services.set("sceneEligibility", sceneEligibility);
   services.set("settings", settings);
 
@@ -55,6 +59,7 @@ export function createRuntime({
     initialize() {
       if (initialized) return false;
       registerSettings(settings);
+      resolvedPersistenceService.initialize();
       initialized = true;
       return true;
     },
@@ -118,6 +123,8 @@ export function createModuleApi(runtime) {
     moveElevationByTacticalDelta: (...args) => runtime
       .getService("coordinateAdapter")
       .moveElevationByTacticalDelta(...args),
+    getPersistenceService: () => runtime.getService("persistence"),
+    getUserPreferences: () => runtime.getService("persistence").getPreferences(),
     getTacticalState: (token, scene, options) => runtime
       .getService("coordinateAdapter")
       .toTactical(token, scene, options),

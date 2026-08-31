@@ -5,6 +5,7 @@ import {
   registerSettings
 } from "../../scripts/settings.js";
 import { MODULE_ID } from "../../scripts/constants.js";
+import { USER_LAYOUT_SETTING_KEY } from "../../scripts/persistence/user-layouts.js";
 
 function makeSettings() {
   const registrations = [];
@@ -17,19 +18,14 @@ function makeSettings() {
 }
 
 describe("Foundry setting registration", () => {
-  it("registers the required user preferences as user-scoped settings", () => {
+  it("registers the structured user layout as a user-scoped setting", () => {
     const settings = makeSettings();
 
     registerSettings(settings);
 
     const userSettings = settings.registrations.filter(({ config }) => config.scope === "user");
-    expect(userSettings.map(({ key }) => key)).toEqual(expect.arrayContaining([
-      "defaultPanelCount",
-      "linkSelection",
-      "linkCenter",
-      "linkZoom"
-    ]));
-    expect(userSettings).toHaveLength(4);
+    expect(userSettings.map(({ key }) => key)).toEqual([USER_LAYOUT_SETTING_KEY]);
+    expect(userSettings).toHaveLength(1);
     expect(userSettings.every(({ namespace }) => namespace === MODULE_ID)).toBe(true);
   });
 
@@ -48,6 +44,6 @@ describe("Foundry setting registration", () => {
 
   it("exposes immutable registration definitions without per-Scene layout storage", () => {
     expect(Object.isFrozen(SETTING_DEFINITIONS)).toBe(true);
-    expect(SETTING_DEFINITIONS.some(({ key }) => key.includes("layout"))).toBe(false);
+    expect(SETTING_DEFINITIONS.some(({ key }) => key === USER_LAYOUT_SETTING_KEY)).toBe(true);
   });
 });

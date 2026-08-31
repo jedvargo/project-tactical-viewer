@@ -96,12 +96,12 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] Pure tests only; no isometric drag code.
 
 ### P08 — User/client persistence
-- [ ] Register user-scoped layout setting.
-- [ ] Register client-scoped rendering preferences.
-- [ ] Add layout schema/version.
-- [ ] Add migration.
-- [ ] Add bounded/LRU Scene-layout pruning.
-- [ ] Test scope correctness and corrupt entry fallback.
+- [x] Register user-scoped layout setting.
+- [x] Register client-scoped rendering preferences.
+- [x] Add layout schema/version.
+- [x] Add migration.
+- [x] Add bounded/LRU Scene-layout pruning.
+- [x] Test scope correctness and corrupt entry fallback.
 
 ### P09 — Tactical token state
 - [ ] Participation flag access.
