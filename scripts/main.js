@@ -15,14 +15,17 @@ function foundryLogger() {
   return typeof globalThis !== "undefined" ? globalThis.console : undefined;
 }
 
+function foundrySettings() {
+  return typeof globalThis !== "undefined" ? globalThis.game?.settings : undefined;
+}
+
 function publishModuleApi(api) {
   const module = globalThis?.game?.modules?.get?.(MODULE_ID);
   if (module) module.api = api;
 }
 
 /**
- * Register the module's lifecycle boundary. Feature services are introduced
- * by later prompts; Prompt 00 only proves that Foundry can initialize us.
+ * Register the module's lifecycle boundary and compose its runtime services.
  */
 export function registerModuleLifecycle({ hooks = foundryHooks(), logger = foundryLogger() } = {}) {
   if (!hooks || typeof hooks.once !== "function") return false;
@@ -31,7 +34,7 @@ export function registerModuleLifecycle({ hooks = foundryHooks(), logger = found
   registeredHookBuses.add(hooks);
   hooks.once(INIT_HOOK, () => {
     if (!runtime) {
-      runtime = createRuntime();
+      runtime = createRuntime({ settings: foundrySettings() });
       runtime.initialize();
       moduleApi = createModuleApi(runtime);
       publishModuleApi(moduleApi);

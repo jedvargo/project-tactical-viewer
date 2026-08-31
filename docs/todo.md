@@ -49,12 +49,13 @@ A prompt may be marked complete only after its focused tests, full automated sui
 ## Foundry state and coordinates
 
 ### P03 — Scene eligibility/settings
-- [ ] Register settings with correct world/user/client scopes.
-- [ ] Implement square-grid Scene eligibility.
-- [ ] Validate positive grid size/distance.
-- [ ] Add Scene tactical enable flag access.
-- [ ] Expose eligibility via runtime.
-- [ ] Real Foundry supported/unsupported Scene smoke tests.
+- [x] Register settings with correct world/user/client scopes.
+- [x] Implement square-grid Scene eligibility.
+- [x] Validate positive grid size/distance.
+- [x] Add Scene tactical enable flag access.
+- [x] Expose eligibility via runtime.
+- [!] Real Foundry supported/unsupported Scene smoke tests.
+  - Blocked: no linked or installed Foundry VTT v14 test environment was available for this workspace; the Foundry-shaped diagnostic smoke check passed.
 
 ### P04 — Token anchor and X/Y adapter
 - [ ] Implement tactical center/footprint anchor.

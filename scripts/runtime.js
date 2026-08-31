@@ -4,6 +4,9 @@ import {
 } from "./constants.js";
 import { chebyshevDistance3d } from "./model/distance.js";
 import { OrientationAdapter } from "./model/orientation-adapter.js";
+import { SceneEligibilityService } from "./scene-eligibility.js";
+import { getSceneEnabled, setSceneEnabled } from "./scene-flags.js";
+import { registerSettings } from "./settings.js";
 import { VIEW_REGISTRY } from "./view-registry.js";
 
 /**
@@ -13,12 +16,16 @@ import { VIEW_REGISTRY } from "./view-registry.js";
 export function createRuntime({
   viewRegistry = VIEW_REGISTRY,
   orientationAdapter = new OrientationAdapter(),
-  distance = chebyshevDistance3d
+  distance = chebyshevDistance3d,
+  settings
 } = {}) {
   let initialized = false;
   const services = new Map();
+  const sceneEligibility = new SceneEligibilityService();
   services.set("orientationAdapter", orientationAdapter);
   services.set("distance", distance);
+  services.set("sceneEligibility", sceneEligibility);
+  services.set("settings", settings);
 
   return {
     get initialized() {
@@ -31,8 +38,21 @@ export function createRuntime({
 
     initialize() {
       if (initialized) return false;
+      registerSettings(settings);
       initialized = true;
       return true;
+    },
+
+    isSceneEligible(scene) {
+      return sceneEligibility.evaluate(scene);
+    },
+
+    isSceneEnabled(scene) {
+      return getSceneEnabled(scene) && sceneEligibility.isEligible(scene).eligible;
+    },
+
+    setSceneEnabled(scene, enabled) {
+      return setSceneEnabled(scene, enabled, { eligibilityService: sceneEligibility });
     },
 
     attachService(name, service) {
@@ -67,6 +87,9 @@ export function createModuleApi(runtime) {
     }),
     getViewRegistry: () => runtime.viewRegistry,
     getOrientationAdapter: () => runtime.getService("orientationAdapter"),
-    getDistance: (...deltas) => runtime.getService("distance")(...deltas)
+    getDistance: (...deltas) => runtime.getService("distance")(...deltas),
+    isSceneEligible: (scene) => runtime.isSceneEligible(scene),
+    isSceneEnabled: (scene) => runtime.isSceneEnabled(scene),
+    setSceneEnabled: (scene, enabled) => runtime.setSceneEnabled(scene, enabled)
   });
 }
