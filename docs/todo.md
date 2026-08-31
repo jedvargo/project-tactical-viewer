@@ -89,11 +89,11 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] Forward/inverse tests for interactive views.
 
 ### P07 — Isometric projection/depth math
-- [ ] NE/SE/SW/NW fixed cameras.
-- [ ] Project points and orientation vectors.
-- [ ] Deterministic depth keys.
-- [ ] Tie-break strategy.
-- [ ] Pure tests only; no isometric drag code.
+- [x] NE/SE/SW/NW fixed cameras.
+- [x] Project points and orientation vectors.
+- [x] Deterministic depth keys.
+- [x] Tie-break strategy.
+- [x] Pure tests only; no isometric drag code.
 
 ### P08 — User/client persistence
 - [ ] Register user-scoped layout setting.

@@ -112,3 +112,146 @@ describe("ProjectionEngine orthographic views", () => {
     }
   });
 });
+
+describe("ProjectionEngine fixed isometric views", () => {
+  const isoViews = ["iso-ne", "iso-se", "iso-sw", "iso-nw"];
+  const isoCamera = (view, overrides = {}) => camera(view, {
+    focus: { x: 0, y: 0, z: 0 },
+    scale: 1,
+    screenCenter: { x: 0, y: 0 },
+    ...overrides
+  });
+  const rootHalf = Math.SQRT1_2;
+  const rootSixth = 1 / Math.sqrt(6);
+  const rootTwoThirds = Math.sqrt(2 / 3);
+  const expectProjection = (actual, expected) => {
+    expect(actual.x).toBeCloseTo(expected.x, 12);
+    expect(actual.y).toBeCloseTo(expected.y, 12);
+  };
+
+  it("projects the origin and each positive world axis with explicit camera bases", () => {
+    const expected = {
+      "iso-ne": {
+        origin: { x: 0, y: 0 },
+        x: { x: rootHalf, y: -rootSixth },
+        y: { x: rootHalf, y: rootSixth },
+        z: { x: 0, y: rootTwoThirds }
+      },
+      "iso-se": {
+        origin: { x: 0, y: 0 },
+        x: { x: -rootHalf, y: -rootSixth },
+        y: { x: rootHalf, y: -rootSixth },
+        z: { x: 0, y: rootTwoThirds }
+      },
+      "iso-sw": {
+        origin: { x: 0, y: 0 },
+        x: { x: -rootHalf, y: rootSixth },
+        y: { x: -rootHalf, y: -rootSixth },
+        z: { x: 0, y: rootTwoThirds }
+      },
+      "iso-nw": {
+        origin: { x: 0, y: 0 },
+        x: { x: rootHalf, y: rootSixth },
+        y: { x: -rootHalf, y: rootSixth },
+        z: { x: 0, y: rootTwoThirds }
+      }
+    };
+
+    for (const view of isoViews) {
+      expect(engine.projectPoint({ x: 0, y: 0, z: 0 }, isoCamera(view))).toEqual(
+        expected[view].origin
+      );
+      expectProjection(
+        engine.projectPoint({ x: 1, y: 0, z: 0 }, isoCamera(view)),
+        expected[view].x
+      );
+      expectProjection(
+        engine.projectPoint({ x: 0, y: 1, z: 0 }, isoCamera(view)),
+        expected[view].y
+      );
+      expectProjection(
+        engine.projectPoint({ x: 0, y: 0, z: 1 }, isoCamera(view)),
+        expected[view].z
+      );
+    }
+  });
+
+  it("keeps the four cameras symmetric around the tactical axes", () => {
+    const point = { x: 2, y: 3, z: 4 };
+    const projections = Object.fromEntries(
+      isoViews.map((view) => [view, engine.projectPoint(point, isoCamera(view))])
+    );
+
+    expect(projections["iso-ne"].x).toBeCloseTo((point.x + point.y) * rootHalf);
+    expect(projections["iso-se"].x).toBeCloseTo((-point.x + point.y) * rootHalf);
+    expect(projections["iso-sw"].x).toBeCloseTo((-point.x - point.y) * rootHalf);
+    expect(projections["iso-nw"].x).toBeCloseTo((point.x - point.y) * rootHalf);
+    expect(projections["iso-ne"].y).toBeCloseTo((-point.x + point.y + 2 * point.z) * rootSixth);
+    expect(projections["iso-se"].y).toBeCloseTo((-point.x - point.y + 2 * point.z) * rootSixth);
+    expect(projections["iso-sw"].y).toBeCloseTo((point.x - point.y + 2 * point.z) * rootSixth);
+    expect(projections["iso-nw"].y).toBeCloseTo((point.x + point.y + 2 * point.z) * rootSixth);
+  });
+
+  it("projects every heading and pitch orientation into finite screen vectors", () => {
+    for (const view of isoViews) {
+      for (const heading of [0, 45, 90, 135, 180, 225, 270, 315]) {
+        for (const pitch of [90, 45, 0, -45, -90]) {
+          const projected = engine.projectOrientationVector(
+            orientationVector(heading, pitch),
+            isoCamera(view, { scale: 20 })
+          );
+          expect(Number.isFinite(projected.x)).toBe(true);
+          expect(Number.isFinite(projected.y)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("orders known far and near points using each camera's outward depth basis", () => {
+    const nearByView = {
+      "iso-ne": { x: 3, y: -2, z: 4 },
+      "iso-se": { x: 3, y: 2, z: 4 },
+      "iso-sw": { x: -3, y: 2, z: 4 },
+      "iso-nw": { x: -3, y: -2, z: 4 }
+    };
+
+    for (const view of isoViews) {
+      const near = nearByView[view];
+      const far = { x: -near.x, y: -near.y, z: -near.z };
+      expect(engine.depthKey(near, isoCamera(view))).toBeGreaterThan(
+        engine.depthKey(far, isoCamera(view))
+      );
+      expect(engine.sortByDepth([
+        { id: "near", point: near },
+        { id: "far", point: far }
+      ], isoCamera(view)).map(({ id }) => id)).toEqual(["far", "near"]);
+    }
+  });
+
+  it("uses token IDs as a deterministic equal-depth tie-breaker and preserves no-ID order", () => {
+    const viewCamera = isoCamera("iso-ne");
+    const equalDepth = [
+      { id: "zulu", point: { x: 1, y: 0, z: 0 } },
+      { id: "alpha", point: { x: 0, y: -1, z: 0 } }
+    ];
+
+    expect(engine.sortByDepth(equalDepth, viewCamera).map(({ id }) => id)).toEqual([
+      "alpha",
+      "zulu"
+    ]);
+    expect(engine.sortByDepth([
+      { point: equalDepth[0].point },
+      { point: equalDepth[1].point }
+    ], viewCamera).map((item) => item.point)).toEqual([
+      equalDepth[0].point,
+      equalDepth[1].point
+    ]);
+  });
+
+  it("does not expose an inverse mapping for fixed isometric cameras", () => {
+    expect(() => engine.inversePoint(
+      { x: 0, y: 0 },
+      isoCamera("iso-ne")
+    )).toThrow("Inverse projection is unavailable for isometric views");
+  });
+});

@@ -108,6 +108,8 @@ export function createModuleApi(runtime) {
     getProjectionEngine: () => runtime.getService("projectionEngine"),
     projectPoint: (...args) => runtime.getService("projectionEngine").projectPoint(...args),
     projectVector: (...args) => runtime.getService("projectionEngine").projectVector(...args),
+    depthKey: (...args) => runtime.getService("projectionEngine").depthKey(...args),
+    sortByDepth: (...args) => runtime.getService("projectionEngine").sortByDepth(...args),
     inversePoint: (...args) => runtime.getService("projectionEngine").inversePoint(...args),
     getDistance: (...deltas) => runtime.getService("distance")(...deltas),
     getElevationForTacticalZ: (...args) => runtime

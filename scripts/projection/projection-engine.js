@@ -76,7 +76,100 @@ const ORTHOGRAPHIC_VIEWS = Object.freeze({
   })
 });
 
-const ORTHOGRAPHIC_VIEW_IDS = Object.freeze(Object.keys(ORTHOGRAPHIC_VIEWS));
+const ROOT_TWO = Math.sqrt(2);
+const ROOT_SIX = Math.sqrt(6);
+const ROOT_THREE = Math.sqrt(3);
+
+function basisVector(x, y, z) {
+  return Object.freeze({ x, y, z });
+}
+
+/*
+ * Each isometric camera is a true equal-axis orthographic camera. `depth`
+ * points from the tactical center toward the camera, so a larger depth key
+ * is nearer. Keeping right/up/depth together prevents depth sorting from
+ * drifting away from the screen projection.
+ */
+const ISOMETRIC_VIEWS = Object.freeze({
+  "iso-ne": Object.freeze({
+    id: "iso-ne",
+    name: "Isometric NE",
+    projection: "isometric",
+    visibleAxes: Object.freeze(["x", "y", "z"]),
+    hiddenAxis: null,
+    basis: Object.freeze({
+      right: basisVector(1 / ROOT_TWO, 1 / ROOT_TWO, 0),
+      up: basisVector(-1 / ROOT_SIX, 1 / ROOT_SIX, 2 / ROOT_SIX),
+      depth: basisVector(1 / ROOT_THREE, -1 / ROOT_THREE, 1 / ROOT_THREE)
+    }),
+    cameraPosition: basisVector(1, -1, 1),
+    labels: Object.freeze({
+      horizontal: "+X/+Y screen right",
+      vertical: "+Z screen up",
+      depth: "+X/-Y/+Z toward camera"
+    })
+  }),
+  "iso-se": Object.freeze({
+    id: "iso-se",
+    name: "Isometric SE",
+    projection: "isometric",
+    visibleAxes: Object.freeze(["x", "y", "z"]),
+    hiddenAxis: null,
+    basis: Object.freeze({
+      right: basisVector(-1 / ROOT_TWO, 1 / ROOT_TWO, 0),
+      up: basisVector(-1 / ROOT_SIX, -1 / ROOT_SIX, 2 / ROOT_SIX),
+      depth: basisVector(1 / ROOT_THREE, 1 / ROOT_THREE, 1 / ROOT_THREE)
+    }),
+    cameraPosition: basisVector(1, 1, 1),
+    labels: Object.freeze({
+      horizontal: "-X/+Y screen right",
+      vertical: "+Z screen up",
+      depth: "+X/+Y/+Z toward camera"
+    })
+  }),
+  "iso-sw": Object.freeze({
+    id: "iso-sw",
+    name: "Isometric SW",
+    projection: "isometric",
+    visibleAxes: Object.freeze(["x", "y", "z"]),
+    hiddenAxis: null,
+    basis: Object.freeze({
+      right: basisVector(-1 / ROOT_TWO, -1 / ROOT_TWO, 0),
+      up: basisVector(1 / ROOT_SIX, -1 / ROOT_SIX, 2 / ROOT_SIX),
+      depth: basisVector(-1 / ROOT_THREE, 1 / ROOT_THREE, 1 / ROOT_THREE)
+    }),
+    cameraPosition: basisVector(-1, 1, 1),
+    labels: Object.freeze({
+      horizontal: "-X/-Y screen right",
+      vertical: "+Z screen up",
+      depth: "-X/+Y/+Z toward camera"
+    })
+  }),
+  "iso-nw": Object.freeze({
+    id: "iso-nw",
+    name: "Isometric NW",
+    projection: "isometric",
+    visibleAxes: Object.freeze(["x", "y", "z"]),
+    hiddenAxis: null,
+    basis: Object.freeze({
+      right: basisVector(1 / ROOT_TWO, -1 / ROOT_TWO, 0),
+      up: basisVector(1 / ROOT_SIX, 1 / ROOT_SIX, 2 / ROOT_SIX),
+      depth: basisVector(-1 / ROOT_THREE, -1 / ROOT_THREE, 1 / ROOT_THREE)
+    }),
+    cameraPosition: basisVector(-1, -1, 1),
+    labels: Object.freeze({
+      horizontal: "+X/-Y screen right",
+      vertical: "+Z screen up",
+      depth: "-X/-Y/+Z toward camera"
+    })
+  })
+});
+
+const PROJECTION_VIEWS = Object.freeze({
+  ...ORTHOGRAPHIC_VIEWS,
+  ...ISOMETRIC_VIEWS
+});
+const PROJECTION_VIEW_IDS = Object.freeze(Object.keys(PROJECTION_VIEWS));
 
 function finiteNumber(value, name) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -151,8 +244,35 @@ function freezePoint({ x, y, z }) {
   return Object.freeze({ x, y, z });
 }
 
+function dotProduct(left, right) {
+  return left.x * right.x + left.y * right.y + left.z * right.z;
+}
+
+function projectionDelta(point, focus) {
+  return {
+    x: point.x - focus.x,
+    y: point.y - focus.y,
+    z: point.z - focus.z
+  };
+}
+
+function isometricProjection(definition, delta, scale, center) {
+  return freezeScreenPoint(
+    center.x + dotProduct(delta, definition.basis.right) * scale,
+    center.y + dotProduct(delta, definition.basis.up) * scale
+  );
+}
+
+function isometricVectorProjection(definition, vector, scale) {
+  return freezeScreenPoint(
+    dotProduct(vector, definition.basis.right) * scale,
+    dotProduct(vector, definition.basis.up) * scale
+  );
+}
+
 /**
- * Pure orthographic projection for the five interactive tactical views.
+ * Pure projection for the five orthographic and four fixed isometric tactical
+ * views.
  *
  * A camera's focus is the world point placed at screenCenter (or the center
  * of viewport, or {0, 0} when neither is supplied). Scale is logical screen
@@ -161,36 +281,41 @@ function freezePoint({ x, y, z }) {
  */
 export class ProjectionEngine {
   describe(view) {
-    const definition = ORTHOGRAPHIC_VIEWS[view];
-    if (!definition) throw new RangeError(`Unknown orthographic view: ${view}`);
+    const definition = PROJECTION_VIEWS[view];
+    if (!definition) throw new RangeError(`Unknown projection view: ${view}`);
     return definition;
   }
 
   listViews() {
-    return ORTHOGRAPHIC_VIEW_IDS;
+    return PROJECTION_VIEW_IDS;
   }
 
   projectPoint(point, camera) {
     const worldPoint = pointCoordinates(point);
     const { definition, focus, scale, screenCenter: center } = cameraContext(
       camera,
-      ORTHOGRAPHIC_VIEWS
+      PROJECTION_VIEWS
     );
+    const delta = projectionDelta(worldPoint, focus);
+    if (definition.basis) return isometricProjection(definition, delta, scale, center);
+
     const horizontal = definition.horizontal;
     const vertical = definition.vertical;
 
     return freezeScreenPoint(
-      center.x + horizontal.sign * (worldPoint[horizontal.axis] - focus[horizontal.axis]) * scale,
-      center.y + vertical.sign * (worldPoint[vertical.axis] - focus[vertical.axis]) * scale
+      center.x + horizontal.sign * delta[horizontal.axis] * scale,
+      center.y + vertical.sign * delta[vertical.axis] * scale
     );
   }
 
   projectVector(vector, camera) {
     const orientation = vectorCoordinates(vector);
-    const { definition, scale } = cameraContext(camera, ORTHOGRAPHIC_VIEWS);
+    const { definition, scale } = cameraContext(camera, PROJECTION_VIEWS);
+    const vectorByAxis = { x: orientation.dx, y: orientation.dy, z: orientation.dz };
+    if (definition.basis) return isometricVectorProjection(definition, vectorByAxis, scale);
+
     const horizontal = definition.horizontal;
     const vertical = definition.vertical;
-    const vectorByAxis = { x: orientation.dx, y: orientation.dy, z: orientation.dz };
 
     return freezeScreenPoint(
       horizontal.sign * vectorByAxis[horizontal.axis] * scale,
@@ -202,6 +327,46 @@ export class ProjectionEngine {
     return this.projectVector(vector, camera);
   }
 
+  /**
+   * Return signed distance along the camera's outward basis in tactical
+   * units. Larger values are closer to the camera. This is intentionally not
+   * scaled or translated by the panel: only relative ordering matters.
+   */
+  depthKey(point, camera) {
+    const worldPoint = pointCoordinates(point);
+    const { definition, focus } = cameraContext(camera, PROJECTION_VIEWS);
+    if (!definition.basis) {
+      throw new RangeError("Depth keys are only defined for isometric views");
+    }
+    return dotProduct(projectionDelta(worldPoint, focus), definition.basis.depth);
+  }
+
+  /**
+   * Return a new far-to-near array. Equal-depth entries with IDs are ordered
+   * lexicographically by String(id); entries without IDs retain their input
+   * order. This makes normal TokenDocument IDs a deterministic tie-breaker
+   * while preserving stable sorting for anonymous projection records.
+   */
+  sortByDepth(items, camera, { getPoint = (item) => item.point ?? item } = {}) {
+    if (!Array.isArray(items)) throw new TypeError("Depth-sort items must be an array");
+
+    return items
+      .map((item, index) => ({
+        item,
+        index,
+        depth: this.depthKey(getPoint(item), camera),
+        id: item?.id === undefined || item?.id === null ? null : String(item.id)
+      }))
+      .sort((left, right) => {
+        if (left.depth !== right.depth) return left.depth - right.depth;
+        if (left.id !== null && right.id !== null && left.id !== right.id) {
+          return left.id < right.id ? -1 : 1;
+        }
+        return left.index - right.index;
+      })
+      .map(({ item }) => item);
+  }
+
   inversePoint(screenPoint, camera, { preserve, hiddenCoordinate } = {}) {
     const screen = {
       x: coordinate(screenPoint, "x", "Screen point"),
@@ -209,8 +374,12 @@ export class ProjectionEngine {
     };
     const { definition, focus, scale, screenCenter: center } = cameraContext(
       camera,
-      ORTHOGRAPHIC_VIEWS
+      PROJECTION_VIEWS
     );
+    if (definition.basis) {
+      throw new RangeError("Inverse projection is unavailable for isometric views");
+    }
+
     const horizontal = definition.horizontal;
     const vertical = definition.vertical;
     const visible = {
@@ -232,6 +401,8 @@ export class ProjectionEngine {
 }
 
 export const ORTHOGRAPHIC_VIEW_DEFINITIONS = ORTHOGRAPHIC_VIEWS;
+export const ISOMETRIC_VIEW_DEFINITIONS = ISOMETRIC_VIEWS;
+export const PROJECTION_VIEW_DEFINITIONS = PROJECTION_VIEWS;
 
 export function createProjectionEngine() {
   return new ProjectionEngine();
