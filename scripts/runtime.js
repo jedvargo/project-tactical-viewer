@@ -6,6 +6,7 @@ import { CoordinateAdapter } from "./model/coordinate-adapter.js";
 import { chebyshevDistance3d } from "./model/distance.js";
 import { ElevationAdapter } from "./model/elevation-adapter.js";
 import { OrientationAdapter } from "./model/orientation-adapter.js";
+import { TacticalTokenState } from "./model/tactical-token-state.js";
 import { ProjectionEngine } from "./projection/projection-engine.js";
 import { PersistenceService } from "./persistence/user-layouts.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
@@ -22,6 +23,7 @@ export function createRuntime({
   orientationAdapter = new OrientationAdapter(),
   coordinateAdapter,
   elevationAdapter,
+  tacticalTokenState,
   projectionEngine = new ProjectionEngine(),
   distance = chebyshevDistance3d,
   settings,
@@ -37,10 +39,15 @@ export function createRuntime({
     eligibilityService: sceneEligibility,
     elevationAdapter: resolvedElevationAdapter
   });
+  const resolvedTacticalTokenState = tacticalTokenState ?? new TacticalTokenState({
+    coordinateAdapter: resolvedCoordinateAdapter,
+    orientationAdapter
+  });
   const resolvedPersistenceService = persistenceService ?? new PersistenceService({ settings });
   services.set("orientationAdapter", orientationAdapter);
   services.set("coordinateAdapter", resolvedCoordinateAdapter);
   services.set("elevationAdapter", resolvedElevationAdapter);
+  services.set("tacticalTokenState", resolvedTacticalTokenState);
   services.set("projectionEngine", projectionEngine);
   services.set("distance", distance);
   services.set("persistence", resolvedPersistenceService);
@@ -110,6 +117,7 @@ export function createModuleApi(runtime) {
     getOrientationAdapter: () => runtime.getService("orientationAdapter"),
     getCoordinateAdapter: () => runtime.getService("coordinateAdapter"),
     getElevationAdapter: () => runtime.getService("elevationAdapter"),
+    getTacticalTokenState: () => runtime.getService("tacticalTokenState"),
     getProjectionEngine: () => runtime.getService("projectionEngine"),
     projectPoint: (...args) => runtime.getService("projectionEngine").projectPoint(...args),
     projectVector: (...args) => runtime.getService("projectionEngine").projectVector(...args),
@@ -126,8 +134,8 @@ export function createModuleApi(runtime) {
     getPersistenceService: () => runtime.getService("persistence"),
     getUserPreferences: () => runtime.getService("persistence").getPreferences(),
     getTacticalState: (token, scene, options) => runtime
-      .getService("coordinateAdapter")
-      .toTactical(token, scene, options),
+      .getService("tacticalTokenState")
+      .build(token, scene, options),
     isSceneEligible: (scene) => runtime.isSceneEligible(scene),
     isSceneEnabled: (scene) => runtime.isSceneEnabled(scene),
     setSceneEnabled: (scene, enabled) => runtime.setSceneEnabled(scene, enabled)

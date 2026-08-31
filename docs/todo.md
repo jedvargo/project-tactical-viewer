@@ -104,12 +104,12 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] Test scope correctness and corrupt entry fallback.
 
 ### P09 — Tactical token state
-- [ ] Participation flag access.
-- [ ] Pitch/art flag access.
-- [ ] Prototype-token defaults.
-- [ ] Placed-token runtime state builder.
-- [ ] Multi-cell width/height/depth exposure.
-- [ ] Runtime uses computed TacticalTokenState.
+- [x] Participation flag access.
+- [x] Pitch/art flag access.
+- [x] Prototype-token defaults.
+- [x] Placed-token runtime state builder.
+- [x] Multi-cell width/height/depth exposure.
+- [x] Runtime uses computed TacticalTokenState.
 
 ### P10 — Visibility/permission security service
 - [ ] Current-user visibility filter.
