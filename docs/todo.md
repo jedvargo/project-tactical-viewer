@@ -130,13 +130,14 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] No render/hook code writes.
 
 ### P12 — Hook/event coordinator
-- [ ] `moveToken` listener.
-- [ ] `updateToken` listener.
-- [ ] Create/delete token lifecycle events needed by viewer state.
-- [ ] Coalesce duplicate events with rAF scheduler.
-- [ ] Remove listeners on teardown.
-- [ ] Test no feedback loop.
-- [ ] Complete real Foundry security/write-path Gate 2.
+- [x] `moveToken` listener.
+- [x] `updateToken` listener.
+- [x] Create/delete token lifecycle events needed by viewer state.
+- [x] Coalesce duplicate events with rAF scheduler.
+- [x] Remove listeners on teardown.
+- [x] Test no feedback loop.
+- [!] Complete real Foundry security/write-path Gate 2.
+  - Blocked: no linked or installed Foundry VTT v14 test environment/world was available for the required GM/player multi-client smoke check; automated Foundry-shaped synchronization, visibility, and write-path coverage passed.
 
 ---
 

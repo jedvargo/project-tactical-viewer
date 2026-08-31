@@ -34,7 +34,7 @@ export function registerModuleLifecycle({ hooks = foundryHooks(), logger = found
   registeredHookBuses.add(hooks);
   hooks.once(INIT_HOOK, () => {
     if (!runtime) {
-      runtime = createRuntime({ settings: foundrySettings() });
+      runtime = createRuntime({ settings: foundrySettings(), hooks });
       runtime.initialize();
       moduleApi = createModuleApi(runtime);
       publishModuleApi(moduleApi);

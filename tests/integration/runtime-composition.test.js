@@ -88,4 +88,25 @@ describe("runtime composition root", () => {
     expect(settings.get).toHaveBeenCalledTimes(1);
     expect(createModuleApi(runtime).getUserPreferences().schemaVersion).toBe(2);
   });
+
+  it("starts the live synchronization path and exposes its subscriber boundary", () => {
+    const hooks = createFakeFoundryHooks();
+    const frames = [];
+    const scheduler = (callback) => {
+      frames.push(callback);
+    };
+    const runtime = createRuntime({ hooks, synchronizationScheduler: scheduler });
+    const api = createModuleApi(runtime);
+    const listener = vi.fn();
+    api.onInvalidation(listener);
+
+    runtime.initialize();
+    expect(api.getSynchronizationCoordinator().isActive).toBe(true);
+    expect(hooks.listenerCount("moveToken")).toBe(1);
+
+    hooks.fire("moveToken", { id: "token-1" }, {}, {}, "user-1");
+    expect(frames).toHaveLength(1);
+    frames.shift()();
+    expect(listener).toHaveBeenCalledOnce();
+  });
 });

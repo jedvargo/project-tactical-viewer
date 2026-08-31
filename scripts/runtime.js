@@ -13,6 +13,7 @@ import { PersistenceService } from "./persistence/user-layouts.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
 import { getSceneEnabled, setSceneEnabled } from "./scene-flags.js";
 import { registerSettings } from "./settings.js";
+import { SynchronizationCoordinator } from "./synchronization-coordinator.js";
 import { TacticalStateService } from "./tactical-state-service.js";
 import { TacticalUpdateService } from "./tactical-update-service.js";
 import { VisibilityService } from "./visibility-service.js";
@@ -33,6 +34,9 @@ export function createRuntime({
   settings,
   persistenceService,
   currentUser,
+  hooks,
+  synchronizationCoordinator,
+  synchronizationScheduler,
   visibilityService,
   permissionService,
   tacticalStateService,
@@ -67,6 +71,11 @@ export function createRuntime({
     orientationAdapter,
     permissionService: resolvedPermissionService
   });
+  const resolvedSynchronizationCoordinator = synchronizationCoordinator
+    ?? new SynchronizationCoordinator({
+      hooks,
+      scheduler: synchronizationScheduler
+    });
   const resolvedPersistenceService = persistenceService ?? new PersistenceService({ settings });
   services.set("orientationAdapter", orientationAdapter);
   services.set("coordinateAdapter", resolvedCoordinateAdapter);
@@ -79,6 +88,7 @@ export function createRuntime({
   services.set("projectionEngine", projectionEngine);
   services.set("distance", distance);
   services.set("persistence", resolvedPersistenceService);
+  services.set("synchronization", resolvedSynchronizationCoordinator);
   services.set("sceneEligibility", sceneEligibility);
   services.set("settings", settings);
 
@@ -95,6 +105,7 @@ export function createRuntime({
       if (initialized) return false;
       registerSettings(settings);
       resolvedPersistenceService.initialize();
+      resolvedSynchronizationCoordinator.start();
       initialized = true;
       return true;
     },
@@ -150,6 +161,8 @@ export function createModuleApi(runtime) {
     getVisibilityService: () => runtime.getService("visibility"),
     getPermissionService: () => runtime.getService("permission"),
     getTacticalUpdateService: () => runtime.getService("tacticalUpdate"),
+    getSynchronizationCoordinator: () => runtime.getService("synchronization"),
+    onInvalidation: (listener) => runtime.getService("synchronization").subscribe(listener),
     getProjectionEngine: () => runtime.getService("projectionEngine"),
     projectPoint: (...args) => runtime.getService("projectionEngine").projectPoint(...args),
     projectVector: (...args) => runtime.getService("projectionEngine").projectVector(...args),

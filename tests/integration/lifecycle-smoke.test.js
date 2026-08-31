@@ -16,5 +16,6 @@ describe("module lifecycle boundary", () => {
     expect(logger.info).toHaveBeenCalledWith(
       expect.stringContaining("tactical-3d-viewer")
     );
+    expect(hooks.listenerCount("moveToken")).toBe(1);
   });
 });
