@@ -67,4 +67,13 @@ describe("SceneEligibilityService", () => {
       reason: { code: SCENE_ELIGIBILITY_REASON_CODES.DIMENSIONS }
     });
   });
+
+  it("rejects a square-grid declaration with unequal pixel dimensions", () => {
+    expect(service.evaluate(makeScene({
+      grid: { type: "square", size: 100, sizeX: 100, sizeY: 120, distance: 5 }
+    }))).toMatchObject({
+      eligible: false,
+      reason: { code: SCENE_ELIGIBILITY_REASON_CODES.GRID_SIZE }
+    });
+  });
 });

@@ -114,6 +114,9 @@ export class SceneEligibilityService {
     if (!finitePositive(gridSize) || (grid.sizeY !== undefined && !finitePositive(grid.sizeY))) {
       return result(false, SCENE_ELIGIBILITY_REASON_CODES.GRID_SIZE);
     }
+    if (grid.sizeY !== undefined && grid.sizeY !== gridSize) {
+      return result(false, SCENE_ELIGIBILITY_REASON_CODES.GRID_SIZE);
+    }
     if (!finitePositive(grid.distance)) {
       return result(false, SCENE_ELIGIBILITY_REASON_CODES.GRID_DISTANCE);
     }

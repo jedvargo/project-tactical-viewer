@@ -2,6 +2,7 @@ import {
   CURRENT_SCHEMA_VERSION,
   MODULE_ID
 } from "./constants.js";
+import { CoordinateAdapter } from "./model/coordinate-adapter.js";
 import { chebyshevDistance3d } from "./model/distance.js";
 import { OrientationAdapter } from "./model/orientation-adapter.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
@@ -16,13 +17,18 @@ import { VIEW_REGISTRY } from "./view-registry.js";
 export function createRuntime({
   viewRegistry = VIEW_REGISTRY,
   orientationAdapter = new OrientationAdapter(),
+  coordinateAdapter,
   distance = chebyshevDistance3d,
   settings
 } = {}) {
   let initialized = false;
   const services = new Map();
   const sceneEligibility = new SceneEligibilityService();
+  const resolvedCoordinateAdapter = coordinateAdapter ?? new CoordinateAdapter({
+    eligibilityService: sceneEligibility
+  });
   services.set("orientationAdapter", orientationAdapter);
+  services.set("coordinateAdapter", resolvedCoordinateAdapter);
   services.set("distance", distance);
   services.set("sceneEligibility", sceneEligibility);
   services.set("settings", settings);
@@ -87,7 +93,11 @@ export function createModuleApi(runtime) {
     }),
     getViewRegistry: () => runtime.viewRegistry,
     getOrientationAdapter: () => runtime.getService("orientationAdapter"),
+    getCoordinateAdapter: () => runtime.getService("coordinateAdapter"),
     getDistance: (...deltas) => runtime.getService("distance")(...deltas),
+    getTacticalState: (token, scene, options) => runtime
+      .getService("coordinateAdapter")
+      .toTactical(token, scene, options),
     isSceneEligible: (scene) => runtime.isSceneEligible(scene),
     isSceneEnabled: (scene) => runtime.isSceneEnabled(scene),
     setSceneEnabled: (scene, enabled) => runtime.setSceneEnabled(scene, enabled)

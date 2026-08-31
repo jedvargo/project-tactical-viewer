@@ -58,12 +58,13 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: no linked or installed Foundry VTT v14 test environment was available for this workspace; the Foundry-shaped diagnostic smoke check passed.
 
 ### P04 — Token anchor and X/Y adapter
-- [ ] Implement tactical center/footprint anchor.
-- [ ] Use public square-grid APIs.
-- [ ] Handle Scene padding/offset.
-- [ ] Handle 1x1, 2x2, 3x2, 1x3 fixtures.
-- [ ] Convert tactical cell movement back to valid Token top-left.
-- [ ] Real Foundry coordinate Gate 1 partial test.
+- [x] Implement tactical center/footprint anchor.
+- [x] Use public square-grid APIs.
+- [x] Handle Scene padding/offset.
+- [x] Handle 1x1, 2x2, 3x2, 1x3 fixtures.
+- [x] Convert tactical cell movement back to valid Token top-left.
+- [!] Real Foundry coordinate Gate 1 partial test.
+  - Blocked: no linked or installed Foundry VTT v14 test environment was available for this workspace; automated Foundry-shaped fixtures and diagnostic integration coverage passed.
 
 ### P05 — Elevation/Z adapter
 - [ ] Convert elevation <-> tactical Z.
