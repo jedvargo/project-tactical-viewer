@@ -6,6 +6,7 @@ import { CoordinateAdapter } from "./model/coordinate-adapter.js";
 import { chebyshevDistance3d } from "./model/distance.js";
 import { ElevationAdapter } from "./model/elevation-adapter.js";
 import { OrientationAdapter } from "./model/orientation-adapter.js";
+import { ProjectionEngine } from "./projection/projection-engine.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
 import { getSceneEnabled, setSceneEnabled } from "./scene-flags.js";
 import { registerSettings } from "./settings.js";
@@ -20,6 +21,7 @@ export function createRuntime({
   orientationAdapter = new OrientationAdapter(),
   coordinateAdapter,
   elevationAdapter,
+  projectionEngine = new ProjectionEngine(),
   distance = chebyshevDistance3d,
   settings
 } = {}) {
@@ -36,6 +38,7 @@ export function createRuntime({
   services.set("orientationAdapter", orientationAdapter);
   services.set("coordinateAdapter", resolvedCoordinateAdapter);
   services.set("elevationAdapter", resolvedElevationAdapter);
+  services.set("projectionEngine", projectionEngine);
   services.set("distance", distance);
   services.set("sceneEligibility", sceneEligibility);
   services.set("settings", settings);
@@ -102,6 +105,10 @@ export function createModuleApi(runtime) {
     getOrientationAdapter: () => runtime.getService("orientationAdapter"),
     getCoordinateAdapter: () => runtime.getService("coordinateAdapter"),
     getElevationAdapter: () => runtime.getService("elevationAdapter"),
+    getProjectionEngine: () => runtime.getService("projectionEngine"),
+    projectPoint: (...args) => runtime.getService("projectionEngine").projectPoint(...args),
+    projectVector: (...args) => runtime.getService("projectionEngine").projectVector(...args),
+    inversePoint: (...args) => runtime.getService("projectionEngine").inversePoint(...args),
     getDistance: (...deltas) => runtime.getService("distance")(...deltas),
     getElevationForTacticalZ: (...args) => runtime
       .getService("coordinateAdapter")

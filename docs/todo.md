@@ -80,13 +80,13 @@ A prompt may be marked complete only after its focused tests, full automated sui
 ## Projection/persistence/state
 
 ### P06 — Orthographic projection engine
-- [ ] Top projection.
-- [ ] North projection.
-- [ ] South projection.
-- [ ] East projection.
-- [ ] West projection.
-- [ ] Hidden-axis preservation.
-- [ ] Forward/inverse tests for interactive views.
+- [x] Top projection.
+- [x] North projection.
+- [x] South projection.
+- [x] East projection.
+- [x] West projection.
+- [x] Hidden-axis preservation.
+- [x] Forward/inverse tests for interactive views.
 
 ### P07 — Isometric projection/depth math
 - [ ] NE/SE/SW/NW fixed cameras.
