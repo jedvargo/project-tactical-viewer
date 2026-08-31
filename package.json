@@ -1,0 +1,16 @@
+{
+  "name": "tactical-3d-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "3D Tactical Viewer module for Foundry Virtual Tabletop v14.",
+  "scripts": {
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

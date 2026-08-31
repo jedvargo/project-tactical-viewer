@@ -1,0 +1,336 @@
+# 3D Tactical Viewer — Implementation TODO
+
+Use this checklist together with `prompt_plan.md`.
+
+A prompt may be marked complete only after its focused tests, full automated suite, and any specified Foundry smoke test pass.
+
+## Status legend
+
+```text
+[ ] not started
+[-] in progress
+[x] complete and green
+[!] blocked — document reason beneath item
+```
+
+---
+
+## Foundation
+
+### P00 — Repository/module/test scaffold
+- [x] Create/validate `module.json`.
+- [x] Add ES-module entrypoint.
+- [x] Add development-only test tooling.
+- [x] Add baseline unit/integration test folders.
+- [x] Add fake Foundry test helper skeleton.
+- [x] Prove module init can run without runtime dependency.
+- [!] Run Foundry bootstrap smoke test.
+  - Blocked: no linked or installed Foundry VTT v14 test environment was available for this workspace.
+
+### P01 — Constants, view registry, runtime container
+- [x] Add module ID/schema constants.
+- [x] Add the exact nine-view registry.
+- [x] Add heading/pitch allowed-value constants.
+- [x] Create minimal runtime/service container.
+- [x] Wire constants/runtime into entrypoint.
+- [x] Test registry uniqueness and immutability expectations.
+
+### P02 — Tactical math
+- [x] Heading normalization/snapping.
+- [x] Pitch normalization/snapping.
+- [x] Foundry rotation <-> tactical heading conversion.
+- [x] Orientation-vector calculation.
+- [x] 3D Chebyshev distance.
+- [x] 8x5 orientation truth-table tests.
+- [x] Wire math through OrientationAdapter/runtime.
+
+---
+
+## Foundry state and coordinates
+
+### P03 — Scene eligibility/settings
+- [ ] Register settings with correct world/user/client scopes.
+- [ ] Implement square-grid Scene eligibility.
+- [ ] Validate positive grid size/distance.
+- [ ] Add Scene tactical enable flag access.
+- [ ] Expose eligibility via runtime.
+- [ ] Real Foundry supported/unsupported Scene smoke tests.
+
+### P04 — Token anchor and X/Y adapter
+- [ ] Implement tactical center/footprint anchor.
+- [ ] Use public square-grid APIs.
+- [ ] Handle Scene padding/offset.
+- [ ] Handle 1x1, 2x2, 3x2, 1x3 fixtures.
+- [ ] Convert tactical cell movement back to valid Token top-left.
+- [ ] Real Foundry coordinate Gate 1 partial test.
+
+### P05 — Elevation/Z adapter
+- [ ] Convert elevation <-> tactical Z.
+- [ ] Preserve negative elevation.
+- [ ] Detect off-step elevation.
+- [ ] Define user-initiated tactical Z snapping behavior.
+- [ ] Test multiple grid distances.
+- [ ] Complete real Foundry coordinate Gate 1.
+
+---
+
+## Projection/persistence/state
+
+### P06 — Orthographic projection engine
+- [ ] Top projection.
+- [ ] North projection.
+- [ ] South projection.
+- [ ] East projection.
+- [ ] West projection.
+- [ ] Hidden-axis preservation.
+- [ ] Forward/inverse tests for interactive views.
+
+### P07 — Isometric projection/depth math
+- [ ] NE/SE/SW/NW fixed cameras.
+- [ ] Project points and orientation vectors.
+- [ ] Deterministic depth keys.
+- [ ] Tie-break strategy.
+- [ ] Pure tests only; no isometric drag code.
+
+### P08 — User/client persistence
+- [ ] Register user-scoped layout setting.
+- [ ] Register client-scoped rendering preferences.
+- [ ] Add layout schema/version.
+- [ ] Add migration.
+- [ ] Add bounded/LRU Scene-layout pruning.
+- [ ] Test scope correctness and corrupt entry fallback.
+
+### P09 — Tactical token state
+- [ ] Participation flag access.
+- [ ] Pitch/art flag access.
+- [ ] Prototype-token defaults.
+- [ ] Placed-token runtime state builder.
+- [ ] Multi-cell width/height/depth exposure.
+- [ ] Runtime uses computed TacticalTokenState.
+
+### P10 — Visibility/permission security service
+- [ ] Current-user visibility filter.
+- [ ] Permission/update capability.
+- [ ] Locked and rotation-lock handling.
+- [ ] No hidden metadata leaks.
+- [ ] Add security regression tests.
+- [ ] Real Foundry visibility Gate 2 partial test.
+
+### P11 — Tactical update service
+- [ ] Sole state-writing service.
+- [ ] Partial X/Y/elevation/rotation/pitch updates.
+- [ ] Pre-write permission checks.
+- [ ] Interaction-start field snapshots.
+- [ ] Same-field stale-edit cancellation.
+- [ ] Unrelated-field concurrent updates coexist.
+- [ ] No render/hook code writes.
+
+### P12 — Hook/event coordinator
+- [ ] `moveToken` listener.
+- [ ] `updateToken` listener.
+- [ ] Create/delete token lifecycle events needed by viewer state.
+- [ ] Coalesce duplicate events with rAF scheduler.
+- [ ] Remove listeners on teardown.
+- [ ] Test no feedback loop.
+- [ ] Complete real Foundry security/write-path Gate 2.
+
+---
+
+## Viewer and orthographic MVP
+
+### P13 — ApplicationV2 shell
+- [ ] Create viewer ApplicationV2.
+- [ ] One-panel layout.
+- [ ] Basic open/close.
+- [ ] Mount one Canvas2D surface.
+- [ ] Connect runtime services.
+- [ ] Resize observation.
+- [ ] Viewer opens without continuous repaint.
+
+### P14 — Top renderer
+- [ ] Render tactical background/grid.
+- [ ] Render only visible participating tokens.
+- [ ] Correct token positions.
+- [ ] Render selection/orientation placeholders.
+- [ ] High-DPI backing store.
+- [ ] Viewport culling baseline.
+- [ ] First visible Top-view Foundry smoke test.
+
+### P15 — Selection/pan/zoom
+- [ ] Local tactical selection.
+- [ ] Pointer hit testing.
+- [ ] Pan.
+- [ ] Zoom.
+- [ ] Reset view.
+- [ ] No native token `control()` side effect.
+- [ ] Hidden tokens excluded from hit testing.
+
+### P16 — Top movement + heading
+- [ ] Local movement preview.
+- [ ] Top drag changes X/Y only.
+- [ ] Commit through TacticalUpdateService.
+- [ ] Conflict cancellation.
+- [ ] 45-degree heading editor.
+- [ ] Respect movement/rotation locks.
+- [ ] External native move/rotation redraw.
+- [ ] Real Foundry XY edit smoke test.
+
+### P17 — North X/Z movement + pitch
+- [ ] North renderer using shared renderer/projection engine.
+- [ ] North drag changes X/Z and preserves Y.
+- [ ] Elevation update uses Scene grid distance.
+- [ ] Pitch editor.
+- [ ] Top/North stay synchronized.
+- [ ] Multi-client XYZ smoke test.
+- [ ] Gate 3 minimum useful 3D combat passed.
+
+### P18 — South/East/West
+- [ ] South rendering.
+- [ ] East rendering.
+- [ ] West rendering.
+- [ ] Correct mirrored axes.
+- [ ] X/Z and Y/Z drag semantics.
+- [ ] Shared input path; no copy/paste divergence.
+- [ ] Orthographic projection acceptance tests.
+
+---
+
+## Multi-panel viewer
+
+### P19 — 1–4 panel layouts
+- [ ] Panel count selector 1–4.
+- [ ] Default layouts.
+- [ ] Resizable splitters.
+- [ ] Per-panel projection dropdown.
+- [ ] Duplicate views allowed.
+- [ ] Hidden panel configs retained.
+- [ ] Persist user layout.
+
+### P20 — Linked selection/center/zoom
+- [ ] Link Selection.
+- [ ] Link Center via shared 3D focus.
+- [ ] Link Zoom via logical cell scale.
+- [ ] Independent mode for each link.
+- [ ] Hidden coordinate preserved while linked-panning.
+- [ ] Two-user different-layout smoke test.
+- [ ] Gate 4 passed.
+
+---
+
+## Isometric and artwork
+
+### P21 — Isometric viewer
+- [ ] Render NE.
+- [ ] Render SE.
+- [ ] Render SW.
+- [ ] Render NW.
+- [ ] Project authoritative heading/pitch vector.
+- [ ] Selection/pan/zoom only.
+- [ ] No direct isometric movement.
+
+### P22 — Depth and overlapping tokens
+- [ ] Deterministic isometric depth sort.
+- [ ] Orthographic overlap detection.
+- [ ] Visible-only stack count.
+- [ ] Accessible stack chooser/cycler.
+- [ ] Hidden-axis context.
+- [ ] Selection remains visible.
+
+### P23 — Generic tactical assets
+- [ ] AssetManager.
+- [ ] Generic ship/object/creature/marker.
+- [ ] Lazy image loading.
+- [ ] Broken-load memoization.
+- [ ] Session cache bounds.
+- [ ] Generic fallback always succeeds.
+
+### P24 — Custom artwork
+- [ ] Single custom tactical icon.
+- [ ] Nine optional per-view overrides.
+- [ ] Forward-reference metadata.
+- [ ] Opt-in North/South mirroring.
+- [ ] Opt-in East/West mirroring.
+- [ ] No default isometric mirroring.
+- [ ] Strict fallback-order tests.
+
+### P25 — Scene/token configuration UI
+- [ ] Scene enable control.
+- [ ] Unsupported-grid validation message.
+- [ ] Placed Token participation/pitch/art controls.
+- [ ] Prototype Token defaults.
+- [ ] File Picker integration for images.
+- [ ] Advanced per-view art editor.
+- [ ] Configuration writes use documented flags/settings.
+- [ ] Gate 5 feature-complete smoke test.
+
+---
+
+## Hardening and release
+
+### P26 — Lifecycle/external changes
+- [ ] Scene switch handling.
+- [ ] viewer close/reopen.
+- [ ] token create/delete.
+- [ ] participation toggles.
+- [ ] visibility transitions.
+- [ ] external rotation/elevation/macro updates.
+- [ ] listener teardown.
+- [ ] reconnect refresh path.
+
+### P27 — Accessibility/responsive/keyboards
+- [ ] Accessible controls/labels.
+- [ ] keyboard alternatives for movement/orientation.
+- [ ] focus-scoped shortcuts.
+- [ ] reduced motion.
+- [ ] selected-token accessible summary.
+- [ ] narrow-window behavior.
+- [ ] 1–4 panel controls remain usable.
+
+### P28 — Performance
+- [ ] Static grid/background caching.
+- [ ] culling.
+- [ ] rAF batching verified.
+- [ ] decoded-image cache.
+- [ ] no idle render loop.
+- [ ] 10/50/100-token profiling.
+- [ ] document measurements.
+- [ ] optimize only measured hotspots.
+
+### P29 — Reliability/interoperability
+- [ ] schema migration fixtures.
+- [ ] corrupt-data recovery.
+- [ ] missing art recovery.
+- [ ] Foundry rejection/clamping handling.
+- [ ] stale layout cleanup.
+- [ ] module coexistence checks.
+- [ ] no private API dependency without documented justification.
+- [ ] reconnect/multi-user regression suite.
+
+### P30 — Release candidate
+- [ ] Complete localization keys.
+- [ ] Complete `module.json` metadata/compatibility.
+- [ ] README install/use/limitations.
+- [ ] manual Foundry smoke checklist complete.
+- [ ] multi-client checklist complete.
+- [ ] full spec acceptance matrix complete.
+- [ ] no runtime dependencies.
+- [ ] no debug output/test hooks in production path.
+- [ ] package/install smoke test from release ZIP.
+- [ ] Gate 6 passed.
+
+---
+
+## Deferred post-v1 work — do not implement in prompts 00–30
+
+- [ ] Isometric direct movement.
+- [ ] 3D models.
+- [ ] arbitrary/free camera.
+- [ ] map rotation.
+- [ ] hex/gridless cubic adapters.
+- [ ] speed/acceleration/maneuverability rules.
+- [ ] weapon arcs.
+- [ ] firing solutions/range rings.
+- [ ] collision volumes.
+- [ ] multi-cube occupancy rules.
+- [ ] ship-sheet integrations.
+- [ ] external module integrations.

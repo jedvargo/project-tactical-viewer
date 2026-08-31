@@ -1,0 +1,14 @@
+{
+  "id": "tactical-3d-viewer",
+  "title": "3D Tactical Viewer",
+  "description": "Synchronized 2D tactical projections for three-dimensional battlespaces.",
+  "version": "0.1.0",
+  "compatibility": {
+    "minimum": "14",
+    "verified": "14",
+    "maximum": "14"
+  },
+  "esmodules": [
+    "scripts/main.js"
+  ]
+}
