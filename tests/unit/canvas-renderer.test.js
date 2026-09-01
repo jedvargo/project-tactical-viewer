@@ -5,6 +5,7 @@ import {
   createNorthRenderModel,
   createTopRenderModel
 } from "../../scripts/rendering/canvas-renderer.js";
+import { AssetManager } from "../../scripts/rendering/asset-manager.js";
 import { CoordinateAdapter } from "../../scripts/model/coordinate-adapter.js";
 import { ProjectionEngine } from "../../scripts/projection/projection-engine.js";
 import { createFakeSquareGrid } from "../helpers/fake-grid.js";
@@ -23,6 +24,7 @@ function fakeContext() {
     lineTo: vi.fn((...args) => calls.push(["lineTo", ...args])),
     stroke: vi.fn(() => calls.push(["stroke"])),
     arc: vi.fn((...args) => calls.push(["arc", ...args])),
+    drawImage: vi.fn((...args) => calls.push(["drawImage", ...args])),
     fill: vi.fn(() => calls.push(["fill"])),
     fillText: vi.fn((...args) => calls.push(["fillText", ...args])),
     setLineDash: vi.fn((...args) => calls.push(["setLineDash", ...args]))
@@ -80,6 +82,78 @@ function renderInput(states, overrides = {}) {
 }
 
 describe("Canvas2DRendererV1", () => {
+  it("loads only visible token presets and keeps the generated marker and vector when images fail", async () => {
+    const imageFactory = vi.fn(async () => {
+      throw new Error("asset unavailable");
+    });
+    const assetManager = new AssetManager({
+      imageFactory,
+      resolvePath: (source) => source
+    });
+    const currentScene = scene();
+    const model = createTopRenderModel({
+      scene: currentScene,
+      coordinateAdapter: new CoordinateAdapter(),
+      projectionEngine: new ProjectionEngine(),
+      tacticalStates: [
+        state({ tokenId: "visible", art: { preset: "ship" } }),
+        state({ tokenId: "offscreen", tacticalX: 100, tacticalY: 100, art: { preset: "object" } }),
+        state({ tokenId: "hidden", visibleToCurrentUser: false, art: { preset: "creature" } })
+      ],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+    const context = fakeContext();
+
+    new Canvas2DRendererV1({ assetManager }).render({
+      canvas: { width: 1200, height: 800 },
+      context,
+      viewport: { width: 600, height: 400 },
+      devicePixelRatio: 2,
+      model
+    });
+
+    expect(context.calls.some(([name]) => name === "arc")).toBe(true);
+    expect(context.calls.some(([name]) => name === "lineTo")).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(imageFactory).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses a decoded generic image on a later render without replacing the orientation vector", async () => {
+    const decoded = { decode: vi.fn(async () => undefined) };
+    const imageFactory = vi.fn(async () => decoded);
+    const assetManager = new AssetManager({
+      imageFactory,
+      resolvePath: (source) => source
+    });
+    const { model } = renderInput([state({ art: { preset: "ship" } })]);
+    const renderer = new Canvas2DRendererV1({ assetManager });
+    const firstContext = fakeContext();
+    renderer.render({
+      canvas: { width: 1200, height: 800 },
+      context: firstContext,
+      viewport: { width: 600, height: 400 },
+      devicePixelRatio: 2,
+      model
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const secondContext = fakeContext();
+
+    renderer.render({
+      canvas: { width: 1200, height: 800 },
+      context: secondContext,
+      viewport: { width: 600, height: 400 },
+      devicePixelRatio: 2,
+      model
+    });
+
+    expect(secondContext.calls.some(([name]) => name === "drawImage")).toBe(true);
+    expect(secondContext.calls.some(([name]) => name === "lineTo")).toBe(true);
+  });
+
   it("builds a North X/Z model with +Z upward and explicit axis labels", () => {
     const currentScene = scene();
     const model = createNorthRenderModel({

@@ -254,12 +254,12 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] Selection remains visible.
 
 ### P23 — Generic tactical assets
-- [ ] AssetManager.
-- [ ] Generic ship/object/creature/marker.
-- [ ] Lazy image loading.
-- [ ] Broken-load memoization.
-- [ ] Session cache bounds.
-- [ ] Generic fallback always succeeds.
+- [x] AssetManager.
+- [x] Generic ship/object/creature/marker.
+- [x] Lazy image loading.
+- [x] Broken-load memoization.
+- [x] Session cache bounds.
+- [x] Generic fallback always succeeds.
 
 ### P24 — Custom artwork
 - [ ] Single custom tactical icon.

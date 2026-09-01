@@ -10,6 +10,7 @@ import { TacticalTokenState } from "./model/tactical-token-state.js";
 import { PermissionService } from "./permission-service.js";
 import { ProjectionEngine } from "./projection/projection-engine.js";
 import { Canvas2DRendererV1 } from "./rendering/canvas-renderer.js";
+import { AssetManager } from "./rendering/asset-manager.js";
 import { PersistenceService } from "./persistence/user-layouts.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
 import { getSceneEnabled, setSceneEnabled } from "./scene-flags.js";
@@ -44,6 +45,7 @@ export function createRuntime({
   tacticalStateService,
   tacticalUpdateService,
   renderer,
+  assetManager,
   viewerApplicationClass = TacticalViewerApplication
 } = {}) {
   let initialized = false;
@@ -82,9 +84,11 @@ export function createRuntime({
       scheduler: synchronizationScheduler
     });
   const resolvedPersistenceService = persistenceService ?? new PersistenceService({ settings });
+  const resolvedAssetManager = assetManager ?? new AssetManager();
   const resolvedRenderer = renderer ?? new Canvas2DRendererV1({
     coordinateAdapter: resolvedCoordinateAdapter,
-    projectionEngine
+    projectionEngine,
+    assetManager: resolvedAssetManager
   });
   services.set("orientationAdapter", orientationAdapter);
   services.set("coordinateAdapter", resolvedCoordinateAdapter);
@@ -101,6 +105,7 @@ export function createRuntime({
   services.set("sceneEligibility", sceneEligibility);
   services.set("settings", settings);
   services.set("renderer", resolvedRenderer);
+  services.set("assets", resolvedAssetManager);
 
   return {
     get initialized() {
@@ -161,6 +166,7 @@ export function createRuntime({
         tacticalUpdateService: resolvedTacticalUpdateService,
         coordinateAdapter: resolvedCoordinateAdapter,
         projectionEngine,
+        assetManager: resolvedAssetManager,
         renderer: applicationConfiguration.renderer ?? resolvedRenderer
       });
 
@@ -239,6 +245,7 @@ export function createModuleApi(runtime) {
       .getService("coordinateAdapter")
       .moveElevationByTacticalDelta(...args),
     getPersistenceService: () => runtime.getService("persistence"),
+    getAssetManager: () => runtime.getService("assets"),
     getUserPreferences: () => runtime.getService("persistence").getPreferences(),
     getTacticalState: (token, scene, options) => runtime
       .getService("tacticalState")

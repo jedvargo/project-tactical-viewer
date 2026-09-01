@@ -1064,7 +1064,8 @@ export function createTacticalViewerApplicationClass({
           selectedTokenId: this.getSelectedTokenId(panelIndex),
           devicePixelRatio: this.devicePixelRatio,
           visibleTacticalStates,
-          invalidation: this.lastInvalidation
+          invalidation: this.lastInvalidation,
+          invalidate: (invalidation) => this.requestRender(invalidation)
         };
         if (typeof this.renderer === "function") this.renderer(renderInput);
         else this.renderer?.render?.(renderInput);

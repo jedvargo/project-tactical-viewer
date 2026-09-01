@@ -1,6 +1,7 @@
 import { orientationVector } from "../model/orientation-math.js";
 import { CoordinateAdapter } from "../model/coordinate-adapter.js";
 import { ProjectionEngine } from "../projection/projection-engine.js";
+import { AssetManager } from "./asset-manager.js";
 
 const DEFAULT_BACKGROUND = "#111820";
 const DEFAULT_GRID = "rgba(151, 183, 204, 0.34)";
@@ -284,6 +285,7 @@ function visibleToken(state, projectionEngine, camera, viewport, definition) {
     lockRotation: state.lockRotation === true,
     preview: state.preview === true,
     offGrid: state.offGrid === true,
+    art: state.art,
     worldPoint: Object.freeze(worldPoint),
     depthKey: definition.basis ? projectionEngine.depthKey(worldPoint, camera) : null,
     hiddenAxis: definition.hiddenAxis,
@@ -590,13 +592,16 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
   constructor({
     coordinateAdapter = new CoordinateAdapter(),
     projectionEngine = new ProjectionEngine(),
+    assetManager = new AssetManager(),
     colors = {}
   } = {}) {
     super();
     this.coordinateAdapter = coordinateAdapter;
     this.projectionEngine = projectionEngine;
+    this.assetManager = assetManager;
     this.colors = { ...colors };
     this.staticGridCache = undefined;
+    this.pendingAssetInvalidations = new Set();
   }
 
   buildModel(input) {
@@ -689,12 +694,24 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
 
     for (const token of model.tokens) {
       const { point, markerRadius, orientation } = token;
-      context.beginPath?.();
-      context.fillStyle = this.colors.token ?? DEFAULT_TOKEN;
-      context.arc?.(point.x, point.y, markerRadius, 0, Math.PI * 2);
-      context.fill?.();
-      context.strokeStyle = this.colors.tokenStroke ?? DEFAULT_TOKEN_STROKE;
-      context.stroke?.();
+      const preset = token.art?.preset ?? "generic-ship";
+      const imageSource = this.assetManager?.peekPreset?.(preset);
+      if (imageSource && typeof context.drawImage === "function") {
+        try {
+          context.drawImage(
+            imageSource,
+            point.x - markerRadius,
+            point.y - markerRadius,
+            markerRadius * 2,
+            markerRadius * 2
+          );
+        } catch {
+          this.drawGeneratedMarker(context, point, markerRadius);
+        }
+      } else {
+        this.requestAsset(preset, input);
+        this.drawGeneratedMarker(context, point, markerRadius);
+      }
 
       if (token.preview) {
         context.beginPath?.();
@@ -755,6 +772,31 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
 
     context.restore?.();
     return true;
+  }
+
+  drawGeneratedMarker(context, point, markerRadius) {
+    context.beginPath?.();
+    context.fillStyle = this.colors.token ?? DEFAULT_TOKEN;
+    context.arc?.(point.x, point.y, markerRadius, 0, Math.PI * 2);
+    context.fill?.();
+    context.strokeStyle = this.colors.tokenStroke ?? DEFAULT_TOKEN_STROKE;
+    context.stroke?.();
+  }
+
+  requestAsset(preset, input) {
+    if (typeof this.assetManager?.loadPreset !== "function") return;
+    const key = typeof preset === "string" && preset ? preset : "generic-ship";
+    const before = this.assetManager.peekPreset?.(key) ?? null;
+    const promise = this.assetManager.loadPreset(key);
+    if (typeof input.invalidate !== "function" || this.pendingAssetInvalidations.has(key)) return;
+    this.pendingAssetInvalidations.add(key);
+    Promise.resolve(promise).then(() => {
+      this.pendingAssetInvalidations.delete(key);
+      const after = this.assetManager.peekPreset?.(key) ?? null;
+      if (!before && after) input.invalidate({ type: "asset-loaded", preset: key });
+    }, () => {
+      this.pendingAssetInvalidations.delete(key);
+    });
   }
 }
 

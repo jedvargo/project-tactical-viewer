@@ -109,4 +109,13 @@ describe("runtime composition root", () => {
     frames.shift()();
     expect(listener).toHaveBeenCalledOnce();
   });
+
+  it("composes one AssetManager into the runtime renderer boundary", () => {
+    const assetManager = { loadPreset: vi.fn(), peekPreset: vi.fn() };
+    const renderer = { render: vi.fn() };
+    const runtime = createRuntime({ assetManager, renderer });
+
+    expect(runtime.getService("assets")).toBe(assetManager);
+    expect(createModuleApi(runtime).getAssetManager()).toBe(assetManager);
+  });
 });
