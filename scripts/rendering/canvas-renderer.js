@@ -337,7 +337,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
   }
 
   buildModel(input) {
-    const panel = input?.state?.panels?.[0] ?? {};
+    const panel = input?.panel ?? input?.state?.panels?.[input?.panelIndex ?? 0] ?? {};
     const modelOptions = {
       scene: input.scene,
       coordinateAdapter: this.coordinateAdapter,

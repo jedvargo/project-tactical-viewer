@@ -163,6 +163,33 @@ describe("user layout migrations", () => {
 });
 
 describe("user-local persistence service", () => {
+  it("saves and loads the complete four-panel preference payload", async () => {
+    const settings = makeSettings(undefined);
+    const service = new PersistenceService({ settings });
+    service.initialize();
+
+    await service.saveSceneLayout("scene-p19", {
+      panelCount: 3,
+      panels: [
+        { view: "east", overlays: { names: false } },
+        { view: "east" },
+        { view: "south" },
+        { view: "west" }
+      ],
+      splits: [0.35, 0.65],
+      links: { selection: false, center: true, zoom: false }
+    }, { lastUsed: 42 });
+
+    const loaded = service.getSceneLayout("scene-p19");
+    expect(loaded).toMatchObject({
+      panelCount: 3,
+      splits: [0.35, 0.65],
+      links: { selection: false, center: true, zoom: false }
+    });
+    expect(loaded.panels.map(({ view }) => view)).toEqual(["east", "east", "south", "west"]);
+    expect(loaded.panels[0].overlays.names).toBe(false);
+  });
+
   it("keeps two users' fake settings independent", async () => {
     const userASettings = makeSettings(undefined);
     const userBSettings = makeSettings(undefined);

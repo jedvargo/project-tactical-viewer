@@ -11,6 +11,23 @@
   flex-direction: column;
 }
 
+.tactical-viewer-shared-toolbar {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.35rem;
+  padding: 0.25rem;
+}
+
+.tactical-viewer-panel-grid {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 0.2rem;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
 .tactical-viewer-panel-toolbar {
   align-items: center;
   display: flex;
@@ -28,11 +45,48 @@
   text-align: center;
 }
 
+.tactical-viewer-overlay-options {
+  background: #18232c;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.25rem;
+}
+
+.tactical-viewer-overlay-options[hidden] {
+  display: none;
+}
+
 .tactical-viewer-panel {
   display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
+  min-height: 120px;
+  min-width: 180px;
+  overflow: hidden;
+}
+
+.tactical-viewer-panel-grid [data-role="splitter-columns"],
+.tactical-viewer-panel-grid [data-role="splitter-rows"] {
+  background: rgba(206, 229, 240, 0.35);
+  position: absolute;
+  z-index: 2;
+}
+
+.tactical-viewer-panel-grid [data-role="splitter-columns"] {
+  bottom: 0;
+  cursor: col-resize;
+  left: calc(var(--tactical-column-split) - 0.2rem);
+  top: 0;
+  width: 0.4rem;
+}
+
+.tactical-viewer-panel-grid [data-role="splitter-rows"] {
+  cursor: row-resize;
+  height: 0.4rem;
+  left: 50%;
+  right: 0;
+  top: calc(var(--tactical-row-split) - 0.2rem);
 }
 
 .tactical-viewer-canvas {

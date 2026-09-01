@@ -3,6 +3,16 @@ import { ProjectionEngine } from "../projection/projection-engine.js";
 import { isRenderableOrthographicView } from "../rendering/canvas-renderer.js";
 import { VIEW_REGISTRY } from "../view-registry.js";
 import {
+  MIN_PANEL_HEIGHT,
+  MIN_PANEL_WIDTH,
+  PANEL_COUNTS,
+  clampSplitterProportion,
+  defaultPanelAreas,
+  normalizePanelCount,
+  normalizePanelLayout
+} from "./panel-layout.js";
+import { DEFAULT_OVERLAYS } from "../persistence/migrations.js";
+import {
   DEFAULT_LOGICAL_ZOOM,
   PanelInputController
 } from "./panel-input-controller.js";
@@ -40,8 +50,8 @@ function documentFor(options) {
     ?? globalThis?.document;
 }
 
-function viewFor(layout, registry) {
-  const requested = layout?.panels?.[0]?.view;
+function viewFor(layout, index, registry) {
+  const requested = layout?.panels?.[index]?.view;
   return registry.has(requested) && isRenderableOrthographicView(requested) ? requested : "top";
 }
 
@@ -51,24 +61,27 @@ function layoutFor(scene, persistenceService) {
 }
 
 function makeState(scene, persistenceService, registry) {
-  const layout = layoutFor(scene, persistenceService);
+  const layout = normalizePanelLayout(layoutFor(scene, persistenceService));
   return {
     selectedTokenId: null,
     movementPreview: null,
-    panelCount: 1,
+    panelCount: layout.panelCount,
+    splits: layout.splits.slice(),
     links: {
       selection: layout.links?.selection ?? true,
       center: layout.links?.center ?? true,
       zoom: layout.links?.zoom ?? true
     },
-    panels: [{
-      view: viewFor(layout, registry),
+    panels: layout.panels.map((panel, index) => ({
+      // Isometric rendering is intentionally deferred to P21. Keep the
+      // persisted choice in the service, but expose a safe active view here.
+      view: viewFor(layout, index, registry),
       dimensions: { width: 0, height: 0 },
       // Transient session state is intentionally not read from persistence.
       zoom: DEFAULT_LOGICAL_ZOOM,
       focus: null,
-      overlays: { ...(layout.panels?.[0]?.overlays ?? {}) }
-    }]
+      overlays: { ...DEFAULT_OVERLAYS, ...(panel.overlays ?? {}) }
+    }))
   };
 }
 
@@ -169,14 +182,16 @@ export function createTacticalViewerApplicationClass({
       this.scheduledHandle = undefined;
       this.lastInvalidation = undefined;
       this.unsubscribeSynchronization = undefined;
-      this.resizeObserver = undefined;
-      this.canvas = undefined;
-      this.panelElement = undefined;
+      this.resizeObservers = [];
+      this.canvases = [];
+      this.panelElements = [];
+      this.panelGridElement = undefined;
+      this.panelCountSelect = undefined;
       this.zoomLabel = undefined;
       this.pitchSelect = undefined;
       this.selectedTokenReadout = undefined;
       this.actionMessageElement = undefined;
-      this.inputController = undefined;
+      this.inputControllers = [];
       this.attached = false;
     }
 
@@ -185,20 +200,26 @@ export function createTacticalViewerApplicationClass({
     }
 
     getViewportDimensions() {
-      return { ...this.viewport };
+      return { ...this.state.panels[0].dimensions };
     }
 
     getVisibleTacticalStates() {
       return this.tacticalStateService?.getVisibleTacticalStates?.(this.scene) ?? [];
     }
 
-    buildRenderModel(visibleTacticalStates = this.getVisibleTacticalStates()) {
+    buildRenderModel(
+      visibleTacticalStates = this.getVisibleTacticalStates(),
+      panelIndex = 0
+    ) {
+      const panel = this.state.panels[panelIndex] ?? this.state.panels[0];
       return this.renderer?.buildModel?.({
-        canvas: this.canvas,
-        context: this.canvas?.getContext?.("2d"),
+        canvas: this.canvases[panelIndex],
+        context: this.canvases[panelIndex]?.getContext?.("2d"),
         scene: this.scene,
-        viewport: this.getViewportDimensions(),
+        viewport: panel.dimensions,
         state: this.state,
+        panelIndex,
+        panel,
         devicePixelRatio: this.devicePixelRatio,
         visibleTacticalStates
       }) ?? null;
@@ -244,6 +265,148 @@ export function createTacticalViewerApplicationClass({
 
     getTokenById(tokenId) {
       return sceneTokenById(this.scene, tokenId);
+    }
+
+    serializeLayout() {
+      return {
+        panelCount: this.state.panelCount,
+        panels: this.state.panels.map((panel) => ({
+          view: panel.view,
+          overlays: { ...panel.overlays }
+        })),
+        splits: this.state.splits.slice(),
+        links: { ...this.state.links }
+      };
+    }
+
+    persistLayout() {
+      if (typeof this.persistenceService?.saveSceneLayout !== "function") return null;
+      return this.persistenceService.saveSceneLayout(
+        this.scene.id,
+        this.serializeLayout()
+      );
+    }
+
+    async setPanelCount(value) {
+      const panelCount = normalizePanelCount(Number(value), this.state.panelCount);
+      if (panelCount === this.state.panelCount) return panelCount;
+      this.state.panelCount = panelCount;
+      await this.persistLayout();
+      if (this.attached && typeof this.render === "function") await this.render(true);
+      return panelCount;
+    }
+
+    async setPanelView(index, view) {
+      if (!Number.isInteger(index) || index < 0 || index >= this.state.panels.length) {
+        return false;
+      }
+      if (!this.viewRegistry.has(view) || !isRenderableOrthographicView(view)) return false;
+      this.state.panels[index].view = view;
+      await this.persistLayout();
+      this.updatePanelControls(index);
+      this.updateInteractionControls();
+      this.requestRender({ type: "view-change", panelIndex: index, view });
+      return true;
+    }
+
+    async setPanelOverlay(index, key, enabled) {
+      const panel = this.state.panels[index];
+      if (!panel || !Object.hasOwn(DEFAULT_OVERLAYS, key)) return false;
+      panel.overlays[key] = enabled === true;
+      await this.persistLayout();
+      this.requestRender({ type: "overlay-change", panelIndex: index, key });
+      return true;
+    }
+
+    setPanelGridStyles() {
+      if (!this.panelGridElement) return;
+      const areas = defaultPanelAreas(this.state.panelCount);
+      const [columnSplit, rowSplit] = this.state.splits;
+      this.panelGridElement.style.setProperty?.(
+        "--tactical-column-split", `${columnSplit * 100}%`
+      );
+      this.panelGridElement.style.setProperty?.(
+        "--tactical-row-split", `${rowSplit * 100}%`
+      );
+      this.panelGridElement.style.gridTemplateColumns = this.state.panelCount === 1
+        ? "minmax(0, 1fr)"
+        : "minmax(0, var(--tactical-column-split)) minmax(0, 1fr)";
+      this.panelGridElement.style.gridTemplateRows = this.state.panelCount >= 3
+        ? "minmax(0, var(--tactical-row-split)) minmax(0, 1fr)"
+        : "minmax(0, 1fr)";
+      this.panelElements.forEach((panel, index) => {
+        const area = areas[index];
+        if (!area) return;
+        panel.style.gridColumn = `${area.column} / span ${area.columnSpan}`;
+        panel.style.gridRow = `${area.row} / span ${area.rowSpan}`;
+      });
+      const splitters = [
+        this.panelGridElement.querySelector?.('[data-role="splitter-columns"]'),
+        this.panelGridElement.querySelector?.('[data-role="splitter-rows"]')
+      ].filter(Boolean);
+      for (const splitter of splitters) {
+        splitter.hidden = splitter.dataset.axis === "columns"
+          ? this.state.panelCount < 2
+          : this.state.panelCount < 3;
+        splitter.setAttribute?.("aria-valuenow", String(
+          splitter.dataset.axis === "columns" ? columnSplit : rowSplit
+        ));
+      }
+      const rowSplitter = this.panelGridElement.querySelector?.('[data-role="splitter-rows"]');
+      if (rowSplitter) rowSplitter.style.left = this.state.panelCount === 3
+        ? `${columnSplit * 100}%`
+        : "0";
+    }
+
+    setSplitter(axis, value) {
+      const splitIndex = axis === "rows" ? 1 : axis === "columns" ? 0 : -1;
+      if (splitIndex < 0) return false;
+      const rect = this.panelGridElement?.getBoundingClientRect?.() ?? {};
+      const total = axis === "rows" ? Number(rect.height) : Number(rect.width);
+      const minimum = axis === "rows" ? MIN_PANEL_HEIGHT : MIN_PANEL_WIDTH;
+      const proportion = clampSplitterProportion(value, total, minimum);
+      this.state.splits[splitIndex] = proportion;
+      this.setPanelGridStyles();
+      this.persistLayout();
+      this.requestRender({ type: "splitter-change", axis, proportion });
+      return proportion;
+    }
+
+    updatePanelControls(index) {
+      const panelElement = this.panelElements[index];
+      const panel = this.state.panels[index];
+      if (!panelElement || !panel) return;
+      const select = panelElement.querySelector?.('[data-role="view-select"]');
+      if (select) select.value = panel.view;
+      for (const key of Object.keys(DEFAULT_OVERLAYS)) {
+        const checkbox = panelElement.querySelector?.(`[data-role="overlay-${key}"]`);
+        if (checkbox) checkbox.checked = panel.overlays[key] === true;
+      }
+    }
+
+    beginSplitterDrag(axis, splitter, event) {
+      const pointerId = event?.pointerId;
+      const move = (moveEvent) => {
+        if (pointerId !== undefined && moveEvent?.pointerId !== pointerId) return;
+        const rect = this.panelGridElement?.getBoundingClientRect?.() ?? {};
+        const offset = axis === "rows"
+          ? Number(moveEvent?.clientY) - Number(rect.top || 0)
+          : Number(moveEvent?.clientX) - Number(rect.left || 0);
+        const total = axis === "rows" ? Number(rect.height) : Number(rect.width);
+        if (Number.isFinite(offset) && total > 0) this.setSplitter(axis, offset / total);
+        moveEvent?.preventDefault?.();
+      };
+      const end = (endEvent) => {
+        if (pointerId !== undefined && endEvent?.pointerId !== pointerId) return;
+        splitter.removeEventListener?.("pointermove", move);
+        splitter.removeEventListener?.("pointerup", end);
+        splitter.removeEventListener?.("pointercancel", end);
+      };
+      splitter.addEventListener?.("pointermove", move);
+      splitter.addEventListener?.("pointerup", end);
+      splitter.addEventListener?.("pointercancel", end);
+      splitter.setPointerCapture?.(pointerId);
+      event?.preventDefault?.();
     }
 
     updateInteractionControls(visibleTacticalStates = this.getVisibleTacticalStates()) {
@@ -306,12 +469,17 @@ export function createTacticalViewerApplicationClass({
     }
 
     createInputController() {
-      if (!this.canvas || this.inputController) return this.inputController;
-      this.inputController = new PanelInputController({
-        element: this.canvas,
-        panel: this.state.panels[0],
+      return this.createPanelInputController(0);
+    }
+
+    createPanelInputController(index) {
+      const canvas = this.canvases[index];
+      if (!canvas || this.inputControllers[index]) return this.inputControllers[index];
+      this.inputControllers[index] = new PanelInputController({
+        element: canvas,
+        panel: this.state.panels[index],
         projectionEngine: this.projectionEngine,
-        getRenderModel: () => this.buildRenderModel(),
+        getRenderModel: () => this.buildRenderModel(undefined, index),
         scene: this.scene,
         coordinateAdapter: this.coordinateAdapter,
         tacticalUpdateService: this.tacticalUpdateService,
@@ -322,83 +490,138 @@ export function createTacticalViewerApplicationClass({
         onActionResult: (result) => this.handleActionResult(result),
         requestRender: (invalidation) => this.requestRender(invalidation)
       });
-      return this.inputController;
+      return this.inputControllers[index];
     }
 
     async _renderHTML() {
       if (!this.domDocument?.createElement) {
         throw new Error("TacticalViewerApplication requires a browser document to render");
       }
-      this.inputController?.detach?.();
-      this.inputController = undefined;
+      this.inputControllers.forEach((controller) => controller?.detach?.());
+      this.inputControllers = [];
 
       const root = this.domDocument.createElement("div");
       addClass(root, "tactical-viewer-shell");
 
       const toolbar = this.domDocument.createElement("div");
-      addClass(toolbar, "tactical-viewer-panel-toolbar");
-      setRole(toolbar, "panel-toolbar");
-
-      const viewSelect = this.domDocument.createElement("select");
-      viewSelect.setAttribute?.("aria-label", "Tactical projection");
-      setRole(viewSelect, "view-select");
-      for (const view of this.viewRegistry.list().filter(({ id }) => isRenderableOrthographicView(id))) {
+      addClass(toolbar, "tactical-viewer-shared-toolbar");
+      setRole(toolbar, "shared-toolbar");
+      const panelCountLabel = this.domDocument.createElement("label");
+      panelCountLabel.textContent = "Panels";
+      const panelCountSelect = this.domDocument.createElement("select");
+      panelCountSelect.setAttribute?.("aria-label", "Panel count");
+      setRole(panelCountSelect, "panel-count");
+      for (const count of PANEL_COUNTS) {
         const option = this.domDocument.createElement("option");
-        option.value = view.id;
-        option.textContent = view.name;
-        viewSelect.appendChild(option);
+        option.value = String(count);
+        option.textContent = String(count);
+        panelCountSelect.appendChild(option);
       }
-      viewSelect.value = this.state.panels[0].view;
-      viewSelect.addEventListener?.("change", () => {
-        if (this.viewRegistry.has(viewSelect.value)) {
-          this.state.panels[0].view = viewSelect.value;
-          this.updateInteractionControls();
-          this.requestRender({ type: "view-change" });
+      panelCountSelect.value = String(this.state.panelCount);
+      panelCountSelect.addEventListener?.("change", () => this.setPanelCount(panelCountSelect.value));
+      toolbar.append(panelCountLabel, panelCountSelect);
+
+      const panelGrid = this.domDocument.createElement("div");
+      addClass(panelGrid, "tactical-viewer-panel-grid");
+      setRole(panelGrid, "panel-grid");
+
+      this.panelElements = [];
+      this.canvases = [];
+      for (let index = 0; index < this.state.panelCount; index += 1) {
+        const panel = this.domDocument.createElement("section");
+        addClass(panel, "tactical-viewer-panel");
+        setRole(panel, "panel");
+        panel.dataset.panelIndex = String(index);
+
+        const panelToolbar = this.domDocument.createElement("div");
+        addClass(panelToolbar, "tactical-viewer-panel-toolbar");
+        setRole(panelToolbar, "panel-toolbar");
+        const viewSelect = this.domDocument.createElement("select");
+        viewSelect.setAttribute?.("aria-label", `Panel ${index + 1} projection`);
+        setRole(viewSelect, "view-select");
+        for (const view of this.viewRegistry.list().filter(({ id }) => isRenderableOrthographicView(id))) {
+          const option = this.domDocument.createElement("option");
+          option.value = view.id;
+          option.textContent = view.name;
+          viewSelect.appendChild(option);
         }
-      });
+        viewSelect.value = this.state.panels[index].view;
+        viewSelect.addEventListener?.("change", () => this.setPanelView(index, viewSelect.value));
 
-      const zoomOut = makeButton(this.domDocument, "−", "zoom-out", "Zoom out");
-      const zoomLabel = this.domDocument.createElement("span");
-      zoomLabel.textContent = `${this.state.panels[0].zoom} px/cell`;
-      setRole(zoomLabel, "zoom-label");
-      const zoomIn = makeButton(this.domDocument, "+", "zoom-in", "Zoom in");
-      const resetView = makeButton(this.domDocument, "Reset", "reset-view", "Reset view");
-      const headingDecrease = makeButton(this.domDocument, "−45°", "heading-decrease", "Rotate heading left 45 degrees");
-      const headingIncrease = makeButton(this.domDocument, "+45°", "heading-increase", "Rotate heading right 45 degrees");
-      const pitchSelect = this.domDocument.createElement("select");
-      pitchSelect.setAttribute?.("aria-label", "Pitch");
-      setRole(pitchSelect, "pitch-select");
-      for (const pitch of ALLOWED_PITCHES) {
-        const option = this.domDocument.createElement("option");
-        option.value = String(pitch);
-        option.textContent = `${pitch > 0 ? "+" : ""}${pitch}°`;
-        pitchSelect.appendChild(option);
+        const zoomOut = makeButton(this.domDocument, "−", "zoom-out", "Zoom out");
+        const zoomLabel = this.domDocument.createElement("span");
+        zoomLabel.textContent = `${this.state.panels[index].zoom} px/cell`;
+        setRole(zoomLabel, "zoom-label");
+        const zoomIn = makeButton(this.domDocument, "+", "zoom-in", "Zoom in");
+        const resetView = makeButton(this.domDocument, "Reset", "reset-view", "Reset view");
+        const headingDecrease = makeButton(this.domDocument, "−45°", "heading-decrease", "Rotate heading left 45 degrees");
+        const headingIncrease = makeButton(this.domDocument, "+45°", "heading-increase", "Rotate heading right 45 degrees");
+        const pitchSelect = this.domDocument.createElement("select");
+        pitchSelect.setAttribute?.("aria-label", "Pitch");
+        setRole(pitchSelect, "pitch-select");
+        for (const pitch of ALLOWED_PITCHES) {
+          const option = this.domDocument.createElement("option");
+          option.value = String(pitch);
+          option.textContent = `${pitch > 0 ? "+" : ""}${pitch}°`;
+          pitchSelect.appendChild(option);
+        }
+        pitchSelect.addEventListener?.("change", () => {
+          const pitch = Number(pitchSelect.value);
+          if (ALLOWED_PITCHES.includes(pitch)) this.setPitchTo(pitch);
+        });
+        const optionsButton = makeButton(this.domDocument, "Options", "panel-options", "Panel options");
+        const options = this.domDocument.createElement("div");
+        addClass(options, "tactical-viewer-overlay-options");
+        options.hidden = true;
+        optionsButton.addEventListener?.("click", () => {
+          options.hidden = !options.hidden;
+        });
+        for (const key of Object.keys(DEFAULT_OVERLAYS)) {
+          const label = this.domDocument.createElement("label");
+          const checkbox = this.domDocument.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = this.state.panels[index].overlays[key] === true;
+          setRole(checkbox, `overlay-${key}`);
+          checkbox.setAttribute?.("aria-label", `${key} overlay`);
+          checkbox.addEventListener?.("change", () => this.setPanelOverlay(index, key, checkbox.checked));
+          label.textContent = key;
+          label.appendChild(checkbox);
+          options.appendChild(label);
+        }
+        panelToolbar.append(
+          viewSelect, zoomOut, zoomLabel, zoomIn, resetView,
+          headingDecrease, headingIncrease, pitchSelect, optionsButton, options
+        );
+
+        const canvas = this.domDocument.createElement("canvas");
+        addClass(canvas, "tactical-viewer-canvas");
+        setRole(canvas, "canvas");
+        canvas.setAttribute?.("aria-label", `Panel ${index + 1} tactical projection canvas`);
+        panel.append(panelToolbar, canvas);
+        panelGrid.appendChild(panel);
+        this.panelElements.push(panel);
+        this.canvases.push(canvas);
+        const controller = this.createPanelInputController(index);
+        zoomOut.addEventListener?.("click", () => controller?.zoomOut());
+        zoomIn.addEventListener?.("click", () => controller?.zoomIn());
+        resetView.addEventListener?.("click", () => controller?.resetView());
+        headingDecrease.addEventListener?.("click", () => this.setHeadingBy(-45));
+        headingIncrease.addEventListener?.("click", () => this.setHeadingBy(45));
       }
-      pitchSelect.addEventListener?.("change", () => {
-        const pitch = Number(pitchSelect.value);
-        if (ALLOWED_PITCHES.includes(pitch)) this.setPitchTo(pitch);
-      });
-      const optionsButton = makeButton(this.domDocument, "Options", "panel-options", "Panel options");
-      toolbar.append(
-        viewSelect,
-        zoomOut,
-        zoomLabel,
-        zoomIn,
-        resetView,
-        headingDecrease,
-        headingIncrease,
-        pitchSelect,
-        optionsButton
-      );
 
-      const panel = this.domDocument.createElement("section");
-      addClass(panel, "tactical-viewer-panel");
-      setRole(panel, "panel");
-      const canvas = this.domDocument.createElement("canvas");
-      addClass(canvas, "tactical-viewer-canvas");
-      setRole(canvas, "canvas");
-      canvas.setAttribute?.("aria-label", "Tactical projection canvas");
-      panel.appendChild(canvas);
+      const columnSplitter = this.domDocument.createElement("div");
+      setRole(columnSplitter, "splitter-columns");
+      columnSplitter.dataset.axis = "columns";
+      columnSplitter.setAttribute?.("role", "separator");
+      columnSplitter.addEventListener?.("pointerdown", (event) => this.beginSplitterDrag("columns", columnSplitter, event));
+      panelGrid.appendChild(columnSplitter);
+      const rowSplitter = this.domDocument.createElement("div");
+      setRole(rowSplitter, "splitter-rows");
+      rowSplitter.dataset.axis = "rows";
+      rowSplitter.setAttribute?.("role", "separator");
+      rowSplitter.addEventListener?.("pointerdown", (event) => this.beginSplitterDrag("rows", rowSplitter, event));
+      panelGrid.appendChild(rowSplitter);
+
       const selectedTokenReadout = this.domDocument.createElement("div");
       addClass(selectedTokenReadout, "tactical-viewer-selected-token-readout");
       selectedTokenReadout.setAttribute?.("aria-live", "polite");
@@ -409,22 +632,17 @@ export function createTacticalViewerApplicationClass({
       addClass(actionMessage, "tactical-viewer-action-message");
       actionMessage.setAttribute?.("aria-live", "polite");
       setRole(actionMessage, "action-message");
-      root.append(toolbar, panel);
+      root.append(toolbar, panelGrid);
       root.appendChild(selectedTokenReadout);
       root.appendChild(actionMessage);
 
-      this.canvas = canvas;
-      this.panelElement = panel;
-      this.zoomLabel = zoomLabel;
-      this.pitchSelect = pitchSelect;
+      this.panelGridElement = panelGrid;
+      this.panelCountSelect = panelCountSelect;
+      this.zoomLabel = this.panelElements[0]?.querySelector?.('[data-role="zoom-label"]');
+      this.pitchSelect = this.panelElements[0]?.querySelector?.('[data-role="pitch-select"]');
       this.selectedTokenReadout = selectedTokenReadout;
       this.actionMessageElement = actionMessage;
-      const controller = this.createInputController();
-      zoomOut.addEventListener?.("click", () => controller?.zoomOut());
-      zoomIn.addEventListener?.("click", () => controller?.zoomIn());
-      resetView.addEventListener?.("click", () => controller?.resetView());
-      headingDecrease.addEventListener?.("click", () => this.setHeadingBy(-45));
-      headingIncrease.addEventListener?.("click", () => this.setHeadingBy(45));
+      this.setPanelGridStyles();
       this.updateInteractionControls();
       return root;
     }
@@ -450,29 +668,35 @@ export function createTacticalViewerApplicationClass({
     }
 
     attachResizeObserver() {
-      if (!this.panelElement || typeof globalThis?.ResizeObserver !== "function") return;
-      this.resizeObserver = new globalThis.ResizeObserver((entries) => {
-        this.updateViewport(entries?.[0]?.contentRect);
+      if (typeof globalThis?.ResizeObserver !== "function") return;
+      this.resizeObservers = this.panelElements.map((panel, index) => {
+        const observer = new globalThis.ResizeObserver((entries) => {
+          this.updateViewport(entries?.[0]?.contentRect, index);
+        });
+        observer.observe(panel);
+        return observer;
       });
-      this.resizeObserver.observe(this.panelElement);
     }
 
     detachResizeObserver() {
-      this.resizeObserver?.disconnect?.();
-      this.resizeObserver = undefined;
+      this.resizeObservers.forEach((observer) => observer?.disconnect?.());
+      this.resizeObservers = [];
     }
 
-    updateViewport(rect = this.panelElement?.getBoundingClientRect?.()) {
+    updateViewport(rect = this.panelElements[0]?.getBoundingClientRect?.(), index = 0) {
       const width = Math.max(0, Number(rect?.width) || 0);
       const height = Math.max(0, Number(rect?.height) || 0);
-      this.viewport = { width, height };
-      this.state.panels[0].dimensions = { width, height };
-      if (this.canvas) {
-        this.canvas.style.width = `${width}px`;
-        this.canvas.style.height = `${height}px`;
-        this.canvas.width = Math.round(width * this.devicePixelRatio);
-        this.canvas.height = Math.round(height * this.devicePixelRatio);
+      if (!this.state.panels[index]) return this.getViewportDimensions();
+      this.state.panels[index].dimensions = { width, height };
+      if (index === 0) this.viewport = { width, height };
+      const canvas = this.canvases[index];
+      if (canvas) {
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        canvas.width = Math.round(width * this.devicePixelRatio);
+        canvas.height = Math.round(height * this.devicePixelRatio);
       }
+      this.setPanelGridStyles();
       if (this.attached) this.requestRender({ type: "resize" });
       return this.getViewportDimensions();
     }
@@ -494,24 +718,28 @@ export function createTacticalViewerApplicationClass({
     }
 
     renderViewport() {
-      if (!this.canvas) return false;
-      const context = this.canvas.getContext?.("2d");
-      context?.clearRect?.(0, 0, this.canvas.width, this.canvas.height);
       const visibleTacticalStates = this.getVisibleTacticalStates();
       this.updateSelectedTokenReadout(visibleTacticalStates);
-      const renderInput = {
-        canvas: this.canvas,
-        context,
-        scene: this.scene,
-        viewport: this.getViewportDimensions(),
-        state: this.state,
-        devicePixelRatio: this.devicePixelRatio,
-        visibleTacticalStates,
-        invalidation: this.lastInvalidation
-      };
-      if (typeof this.renderer === "function") this.renderer(renderInput);
-      else this.renderer?.render?.(renderInput);
-      this.renderCount += 1;
+      for (let panelIndex = 0; panelIndex < this.state.panelCount; panelIndex += 1) {
+        const canvas = this.canvases[panelIndex];
+        if (!canvas) continue;
+        const context = canvas.getContext?.("2d");
+        context?.clearRect?.(0, 0, canvas.width, canvas.height);
+        const renderInput = {
+          canvas,
+          context,
+          scene: this.scene,
+          viewport: this.state.panels[panelIndex].dimensions,
+          state: this.state,
+          panelIndex,
+          devicePixelRatio: this.devicePixelRatio,
+          visibleTacticalStates,
+          invalidation: this.lastInvalidation
+        };
+        if (typeof this.renderer === "function") this.renderer(renderInput);
+        else this.renderer?.render?.(renderInput);
+        this.renderCount += 1;
+      }
       return true;
     }
 
@@ -522,8 +750,8 @@ export function createTacticalViewerApplicationClass({
       this.renderScheduled = false;
       this.scheduledHandle = undefined;
       this.detachResizeObserver();
-      this.inputController?.detach?.();
-      this.inputController = undefined;
+      this.inputControllers.forEach((controller) => controller?.detach?.());
+      this.inputControllers = [];
       this.unsubscribeSynchronization?.();
       this.unsubscribeSynchronization = undefined;
       this.attached = false;

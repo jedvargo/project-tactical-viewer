@@ -211,13 +211,13 @@ A prompt may be marked complete only after its focused tests, full automated sui
 ## Multi-panel viewer
 
 ### P19 — 1–4 panel layouts
-- [ ] Panel count selector 1–4.
-- [ ] Default layouts.
-- [ ] Resizable splitters.
-- [ ] Per-panel projection dropdown.
-- [ ] Duplicate views allowed.
-- [ ] Hidden panel configs retained.
-- [ ] Persist user layout.
+- [x] Panel count selector 1–4.
+- [x] Default layouts.
+- [x] Resizable splitters.
+- [x] Per-panel projection dropdown.
+- [x] Duplicate views allowed.
+- [x] Hidden panel configs retained.
+- [x] Persist user layout.
 
 ### P20 — Linked selection/center/zoom
 - [ ] Link Selection.

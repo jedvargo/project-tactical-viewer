@@ -156,7 +156,7 @@ describe("TacticalViewerApplication", () => {
     vi.unstubAllGlobals();
   });
 
-  it("constructs a one-panel ApplicationV2 shell from persisted preferences", async () => {
+  it("constructs the persisted multi-panel ApplicationV2 shell", async () => {
     const scheduler = createScheduler();
     const document = createFakeDocument();
     const unsubscribe = vi.fn();
@@ -180,17 +180,134 @@ describe("TacticalViewerApplication", () => {
       devicePixelRatio: 1
     });
 
-    expect(application.state.panelCount).toBe(1);
-    expect(application.state.panels).toHaveLength(1);
+    expect(application.state.panelCount).toBe(4);
+    expect(application.state.panels).toHaveLength(4);
     expect(application.state.panels[0].view).toBe("north");
     expect(persistenceService.getSceneLayout).toHaveBeenCalledWith("scene-1");
 
     await application.render(true);
 
-    expect(application.element.querySelectorAll("canvas")).toHaveLength(1);
+    expect(application.element.querySelectorAll("canvas")).toHaveLength(4);
     expect(application.element.querySelector('[data-role="panel-toolbar"]')).not.toBeNull();
     expect(synchronizationCoordinator.subscribe).toHaveBeenCalledOnce();
     expect(scheduler.pendingCount()).toBe(1);
+  });
+
+  it("transitions panel counts, restores hidden panel configuration, and permits duplicate views", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const saveSceneLayout = vi.fn(async (_sceneId, layout) => layout);
+    const persistenceService = {
+      getSceneLayout: () => ({
+        panelCount: 1,
+        panels: [{ view: "top" }, { view: "east" }, { view: "south" }, { view: "west" }],
+        splits: [0.5, 0.5]
+      }),
+      saveSceneLayout
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService,
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    await application.setPanelView(1, "top");
+    await application.setPanelCount(2);
+    await application.setPanelCount(3);
+    await application.setPanelCount(4);
+    await application.setPanelCount(2);
+
+    expect(application.panelCount).toBe(2);
+    expect(application.state.panels.map(({ view }) => view)).toEqual([
+      "top", "top", "south", "west"
+    ]);
+    expect(application.element.querySelectorAll("canvas")).toHaveLength(2);
+    expect(saveSceneLayout).toHaveBeenCalled();
+    expect(saveSceneLayout.mock.calls.at(-1)[1]).toMatchObject({
+      panelCount: 2,
+      panels: [{ view: "top" }, { view: "top" }, { view: "south" }, { view: "west" }]
+    });
+  });
+
+  it("renders every visible panel from one canonical state list on one invalidation", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    let invalidate;
+    const visibleStates = [{ tokenId: "ship", visibleToCurrentUser: true }];
+    const tokenDocument = { id: "ship", update: vi.fn() };
+    const renderer = { render: vi.fn() };
+    const tacticalStateService = {
+      getVisibleTacticalStates: vi.fn(() => visibleStates)
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: { ...createScene(), tokens: [tokenDocument] },
+      persistenceService: {
+        getSceneLayout: () => ({
+          panelCount: 3,
+          panels: [{ view: "top" }, { view: "north" }, { view: "east" }]
+        })
+      },
+      synchronizationCoordinator: {
+        subscribe: (listener) => {
+          invalidate = listener;
+          return () => {};
+        }
+      },
+      tacticalStateService,
+      renderer,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    scheduler.flush();
+    renderer.render.mockClear();
+    tacticalStateService.getVisibleTacticalStates.mockClear();
+    invalidate({ type: "token-invalidation", tokenId: "ship" });
+    invalidate({ type: "token-invalidation", tokenId: "ship" });
+    scheduler.flush();
+
+    expect(tacticalStateService.getVisibleTacticalStates).toHaveBeenCalledOnce();
+    expect(renderer.render).toHaveBeenCalledTimes(3);
+    expect(tokenDocument.update).not.toHaveBeenCalled();
+    expect(renderer.render.mock.calls.map(([input]) => input.state.panels[input.panelIndex].view))
+      .toEqual(["top", "north", "east"]);
+  });
+
+  it("persists panel views, overlays, and clamped splitter proportions", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const saveSceneLayout = vi.fn(async (_sceneId, layout) => layout);
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService: {
+        getSceneLayout: () => ({ panelCount: 2, panels: [{ view: "top" }, { view: "north" }] }),
+        saveSceneLayout
+      },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    await application.setPanelView(1, "east");
+    await application.setPanelOverlay(1, "names", false);
+    application.setSplitter("columns", 0.01);
+
+    const saved = saveSceneLayout.mock.calls.at(-1)[1];
+    expect(saved.panelCount).toBe(2);
+    expect(saved.panels[0].view).toBe("top");
+    expect(saved.panels[1]).toMatchObject({ view: "east", overlays: { names: false } });
+    expect(saved.splits).toEqual([0.28125, 0.5]);
   });
 
   it("offers every renderable orthographic view and does not present deferred isometrics as active", async () => {
