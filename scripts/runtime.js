@@ -14,7 +14,7 @@ import { AssetManager } from "./rendering/asset-manager.js";
 import { PersistenceService } from "./persistence/user-layouts.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
 import { getSceneEnabled, setSceneEnabled } from "./scene-flags.js";
-import { registerSettings } from "./settings.js";
+import { AUTO_OPEN_SETTING_KEY, registerSettings } from "./settings.js";
 import { SynchronizationCoordinator } from "./synchronization-coordinator.js";
 import { TacticalStateService } from "./tactical-state-service.js";
 import { TacticalUpdateService } from "./tactical-update-service.js";
@@ -54,10 +54,13 @@ export function createRuntime({
   tacticalUpdateService,
   renderer,
   assetManager,
-  viewerApplicationClass = TacticalViewerApplication
+  viewerApplicationClass = TacticalViewerApplication,
+  keybindings
 } = {}) {
   let initialized = false;
   let activeViewer;
+  let keybindingRegistered = false;
+  let sceneSession;
   const services = new Map();
   const sceneEligibility = new SceneEligibilityService();
   const resolvedElevationAdapter = elevationAdapter
@@ -120,7 +123,109 @@ export function createRuntime({
   services.set("assets", resolvedAssetManager);
   services.set("configurationUI", resolvedConfigurationUI);
 
-  return {
+  const sceneIdOf = (scene) => scene?.id ?? scene?._id;
+  const sceneFromCanvas = (canvasOrScene) => canvasOrScene?.scene ?? canvasOrScene;
+  const autoOpenEnabled = () => {
+    try {
+      const value = settings?.get?.(MODULE_ID, AUTO_OPEN_SETTING_KEY);
+      return typeof value === "boolean" ? value : true;
+    } catch {
+      return true;
+    }
+  };
+
+  const markApplicationClosed = (viewer, { source = "application" } = {}) => {
+    if (activeViewer === viewer) activeViewer = undefined;
+    if (source === "application"
+      && sceneSession
+      && sceneIdOf(viewer?.scene) === sceneSession.sceneId
+      && !sceneSession.closingForLifecycle) {
+      sceneSession.manuallyClosed = true;
+    }
+  };
+
+  const closeActiveViewer = async ({ manual = false, reason = "manual" } = {}) => {
+    const viewer = activeViewer;
+    activeViewer = undefined;
+    if (!viewer) return null;
+    if (manual && sceneSession && sceneIdOf(viewer.scene) === sceneSession.sceneId) {
+      sceneSession.manuallyClosed = true;
+    }
+    sceneSession && (sceneSession.closingForLifecycle = !manual);
+    try {
+      if (typeof viewer.close === "function") await viewer.close({ reason });
+    } finally {
+      if (sceneSession) sceneSession.closingForLifecycle = false;
+    }
+    return viewer;
+  };
+
+  const ensureSceneSession = (scene) => {
+    const sceneId = sceneIdOf(scene);
+    if (!sceneSession || sceneSession.ended || sceneSession.sceneId !== sceneId) {
+      sceneSession = {
+        scene,
+        sceneId,
+        ended: false,
+        manuallyClosed: false,
+        autoOpened: false,
+        closingForLifecycle: false
+      };
+    } else {
+      sceneSession.scene = scene;
+    }
+    return sceneSession;
+  };
+
+  const handleCanvasReady = async (canvasOrScene) => {
+    const scene = sceneFromCanvas(canvasOrScene);
+    if (!scene || sceneIdOf(scene) === undefined) return null;
+    const session = ensureSceneSession(scene);
+    if (activeViewer && sceneIdOf(activeViewer.scene) !== session.sceneId) {
+      await closeActiveViewer({ reason: "scene-change" });
+    }
+    if (!getSceneEnabled(scene) || !sceneEligibility.isEligible(scene).eligible) {
+      if (activeViewer) await closeActiveViewer({ reason: "scene-ineligible" });
+      return null;
+    }
+    if (!autoOpenEnabled() || session.manuallyClosed || session.autoOpened) {
+      return activeViewer ?? null;
+    }
+    session.autoOpened = true;
+    return runtime.openViewer(scene, { autoOpened: true });
+  };
+
+  const handleCanvasTearDown = async (canvasOrScene) => {
+    const scene = sceneFromCanvas(canvasOrScene);
+    if (activeViewer && (!scene || sceneIdOf(activeViewer.scene) === sceneIdOf(scene))) {
+      await closeActiveViewer({ reason: "scene-teardown" });
+    }
+    if (sceneSession && (!scene || sceneSession.sceneId === sceneIdOf(scene))) {
+      sceneSession.ended = true;
+    }
+    return null;
+  };
+
+  const handleSceneUpdate = async (scene) => {
+    if (!scene || !activeViewer || sceneIdOf(activeViewer.scene) !== sceneIdOf(scene)) return null;
+    if (!getSceneEnabled(scene) || !sceneEligibility.isEligible(scene).eligible) {
+      return closeActiveViewer({ reason: "scene-update" });
+    }
+    return activeViewer.refreshFromDocuments?.({ render: true }) ?? activeViewer;
+  };
+
+  const handleLifecycle = (event) => {
+    if (event?.type === "canvas-ready") return void handleCanvasReady(event.canvas ?? event.scene);
+    if (event?.type === "canvas-teardown") return void handleCanvasTearDown(event.canvas ?? event.scene);
+    if (event?.type === "scene-update") return void handleSceneUpdate(event.scene);
+    return undefined;
+  };
+
+  if (typeof resolvedSynchronizationCoordinator.subscribeLifecycle === "function") {
+    resolvedSynchronizationCoordinator.subscribeLifecycle(handleLifecycle);
+  }
+
+  const runtime = {
     get initialized() {
       return initialized;
     },
@@ -133,6 +238,7 @@ export function createRuntime({
       if (initialized) return false;
       registerSettings(settings);
       resolvedPersistenceService.initialize();
+      this.registerReopenKeybinding(keybindings);
       resolvedSynchronizationCoordinator.start();
       resolvedConfigurationUI.start();
       initialized = true;
@@ -162,8 +268,10 @@ export function createRuntime({
       }
 
       if (activeViewer && typeof activeViewer.close === "function") {
-        await activeViewer.close();
+        await closeActiveViewer({ reason: "viewer-replaced" });
       }
+
+      ensureSceneSession(scene);
 
       const Application = viewerOptions.applicationClass ?? viewerApplicationClass;
       const {
@@ -181,7 +289,8 @@ export function createRuntime({
         coordinateAdapter: resolvedCoordinateAdapter,
         projectionEngine,
         assetManager: resolvedAssetManager,
-        renderer: applicationConfiguration.renderer ?? resolvedRenderer
+        renderer: applicationConfiguration.renderer ?? resolvedRenderer,
+        onClosed: markApplicationClosed
       });
 
       try {
@@ -194,14 +303,41 @@ export function createRuntime({
     },
 
     async closeViewer() {
-      const viewer = activeViewer;
-      activeViewer = undefined;
-      if (viewer?.close) await viewer.close();
-      return viewer ?? null;
+      return closeActiveViewer({ manual: true });
+    },
+
+    async toggleViewer(scene = sceneFromCanvas(globalThis?.canvas)) {
+      const currentScene = scene ?? sceneFromCanvas(globalThis?.canvas);
+      if (!currentScene) return null;
+      if (activeViewer && sceneIdOf(activeViewer.scene) === sceneIdOf(currentScene)) {
+        return this.closeViewer();
+      }
+      return this.openViewer(currentScene, { source: "keybinding" });
+    },
+
+    async refreshViewer() {
+      return activeViewer?.refreshFromDocuments?.() ?? null;
+    },
+
+    registerReopenKeybinding(bindingService = keybindings ?? globalThis?.game?.keybindings) {
+      if (keybindingRegistered || typeof bindingService?.register !== "function") return false;
+      bindingService.register(MODULE_ID, "reopenViewer", {
+        name: "Reopen 3D Tactical Viewer",
+        hint: "Open Tactical Viewer for the active Scene.",
+        editable: [{ key: "KeyV", modifiers: ["CONTROL", "SHIFT"] }],
+        onDown: () => {
+          void this.toggleViewer();
+          return true;
+        },
+        onUp: () => false,
+        precedence: globalThis?.CONST?.KEYBINDING_PRECEDENCE?.NORMAL ?? 1
+      });
+      keybindingRegistered = true;
+      return true;
     },
 
     getViewerApplication() {
-      return activeViewer;
+      return activeViewer ?? null;
     },
 
     attachService(name, service) {
@@ -219,6 +355,8 @@ export function createRuntime({
       return services.get(name);
     }
   };
+
+  return runtime;
 }
 
 export function createModuleApi(runtime) {
@@ -288,6 +426,8 @@ export function createModuleApi(runtime) {
     setPitch: (...args) => runtime.getService("tacticalUpdate").setPitch(...args),
     openViewer: (scene, options) => runtime.openViewer(scene, options),
     closeViewer: () => runtime.closeViewer(),
+    toggleViewer: (scene) => runtime.toggleViewer(scene),
+    refreshViewer: () => runtime.refreshViewer(),
     getViewerApplication: () => runtime.getViewerApplication(),
     isSceneEligible: (scene) => runtime.isSceneEligible(scene),
     isSceneEnabled: (scene) => runtime.isSceneEnabled(scene),

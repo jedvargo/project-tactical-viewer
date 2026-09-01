@@ -7,7 +7,7 @@ const TOKEN_EVENTS = Object.freeze([
   "deleteToken"
 ]);
 
-const LIFECYCLE_EVENTS = Object.freeze(["canvasReady", "canvasTearDown"]);
+const LIFECYCLE_EVENTS = Object.freeze(["canvasReady", "canvasTearDown", "updateScene"]);
 
 const MOVEMENT_FIELDS = Object.freeze(["x", "y", "elevation"]);
 const ROTATION_FIELDS = Object.freeze(["rotation"]);
@@ -22,7 +22,8 @@ const APPEARANCE_FIELDS = Object.freeze([
   "alpha",
   "detectionModes",
   "sight",
-  "occludable"
+  "occludable",
+  "depth"
 ]);
 const MODULE_FLAGS_PREFIX = `flags.${MODULE_ID}`;
 
@@ -108,6 +109,7 @@ export class SynchronizationCoordinator {
     this.scheduler = typeof scheduler === "function" ? scheduler : scheduler?.request;
     this.cancelScheduler = cancelScheduler;
     this.listeners = new Set();
+    this.lifecycleListeners = new Set();
     this.started = false;
     this.active = false;
     this.frameScheduled = false;
@@ -119,8 +121,9 @@ export class SynchronizationCoordinator {
       updateToken: (document, changed) => this.handleUpdate(document, changed),
       createToken: (document) => this.handleCreation(document),
       deleteToken: (document) => this.handleDeletion(document),
-      canvasReady: () => this.activate(),
-      canvasTearDown: () => this.deactivate()
+      canvasReady: (canvas) => this.handleCanvasReady(canvas),
+      canvasTearDown: (canvas) => this.handleCanvasTearDown(canvas),
+      updateScene: (scene, changed) => this.handleSceneUpdate(scene, changed)
     });
   }
 
@@ -142,6 +145,18 @@ export class SynchronizationCoordinator {
 
   onInvalidation(listener) {
     return this.subscribe(listener);
+  }
+
+  subscribeLifecycle(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("Synchronization lifecycle subscribers must be functions");
+    }
+    this.lifecycleListeners.add(listener);
+    return () => this.lifecycleListeners.delete(listener);
+  }
+
+  onLifecycle(listener) {
+    return this.subscribeLifecycle(listener);
   }
 
   start() {
@@ -202,6 +217,24 @@ export class SynchronizationCoordinator {
 
   handleDeletion(document) {
     this.enqueue(document, ["deletion"], [], { deleted: true });
+  }
+
+  handleCanvasReady(canvas) {
+    this.activate();
+    this.emitLifecycle({ type: "canvas-ready", canvas, scene: canvas?.scene ?? canvas });
+  }
+
+  handleCanvasTearDown(canvas) {
+    this.deactivate();
+    this.emitLifecycle({ type: "canvas-teardown", canvas, scene: canvas?.scene ?? canvas });
+  }
+
+  handleSceneUpdate(scene, changed) {
+    this.emitLifecycle({ type: "scene-update", scene, changed });
+  }
+
+  emitLifecycle(event) {
+    for (const listener of this.lifecycleListeners) listener(event);
   }
 
   enqueue(document, reasons, fields, { created = false, deleted = false } = {}) {

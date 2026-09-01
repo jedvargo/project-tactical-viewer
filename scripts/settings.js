@@ -2,6 +2,7 @@ import { MODULE_ID } from "./constants.js";
 import { DEFAULT_USER_LAYOUT } from "./persistence/migrations.js";
 
 export const USER_LAYOUT_SETTING_KEY = "userLayout";
+export const AUTO_OPEN_SETTING_KEY = "autoOpen";
 
 export const SETTING_DEFINITIONS = Object.freeze([
   Object.freeze({
@@ -13,6 +14,17 @@ export const SETTING_DEFINITIONS = Object.freeze([
       config: false,
       type: Object,
       default: DEFAULT_USER_LAYOUT
+    })
+  }),
+  Object.freeze({
+    key: AUTO_OPEN_SETTING_KEY,
+    config: Object.freeze({
+      name: "Automatically open Tactical Viewer",
+      hint: "Open Tactical Viewer when an eligible Scene becomes active.",
+      scope: "user",
+      config: true,
+      type: Boolean,
+      default: true
     })
   }),
   Object.freeze({

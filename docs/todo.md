@@ -286,14 +286,16 @@ A prompt may be marked complete only after its focused tests, full automated sui
 ## Hardening and release
 
 ### P26 — Lifecycle/external changes
-- [ ] Scene switch handling.
-- [ ] viewer close/reopen.
-- [ ] token create/delete.
-- [ ] participation toggles.
-- [ ] visibility transitions.
-- [ ] external rotation/elevation/macro updates.
-- [ ] listener teardown.
-- [ ] reconnect refresh path.
+- [x] Scene switch handling.
+- [x] viewer close/reopen.
+- [x] token create/delete.
+- [x] participation toggles.
+- [x] visibility transitions.
+- [x] external rotation/elevation/macro updates.
+- [x] listener teardown.
+- [x] reconnect refresh path.
+- [!] Manual two-client Foundry lifecycle smoke check.
+  - Blocked: no linked or installed Foundry VTT v14 executable/test World was available for repeated Scene switching and native external-edit verification; automated lifecycle and synchronization coverage passed.
 
 ### P27 — Accessibility/responsive/keyboards
 - [ ] Accessible controls/labels.

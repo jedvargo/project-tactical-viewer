@@ -739,4 +739,47 @@ describe("TacticalViewerApplication", () => {
       "Lower · Z=1", "Upper · Z=4"
     ]);
   });
+
+  it("persists the bounded layout before close and refreshes selection from current Documents", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const saveSceneLayout = vi.fn(async (_sceneId, layout) => layout);
+    let currentStates = [{
+      tokenId: "ship",
+      name: "Aurora",
+      tacticalX: 1,
+      tacticalY: 2,
+      tacticalZ: 3,
+      visibleToCurrentUser: true,
+      participating: true
+    }];
+    const tacticalStateService = {
+      getVisibleTacticalStates: vi.fn(() => currentStates)
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService: {
+        getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }),
+        saveSceneLayout
+      },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      tacticalStateService,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    application.state.selectedTokenId = "ship";
+    currentStates = [];
+    expect(application.refreshFromDocuments()).toEqual([]);
+    expect(application.state.selectedTokenId).toBeNull();
+
+    await application.close();
+    expect(saveSceneLayout).toHaveBeenLastCalledWith("scene-1", expect.objectContaining({
+      panelCount: 1,
+      panels: expect.any(Array)
+    }));
+  });
 });

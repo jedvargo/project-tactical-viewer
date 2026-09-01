@@ -24,8 +24,11 @@ describe("Foundry setting registration", () => {
     registerSettings(settings);
 
     const userSettings = settings.registrations.filter(({ config }) => config.scope === "user");
-    expect(userSettings.map(({ key }) => key)).toEqual([USER_LAYOUT_SETTING_KEY]);
-    expect(userSettings).toHaveLength(1);
+    expect(userSettings.map(({ key }) => key)).toEqual([
+      USER_LAYOUT_SETTING_KEY,
+      "autoOpen"
+    ]);
+    expect(userSettings).toHaveLength(2);
     expect(userSettings.every(({ namespace }) => namespace === MODULE_ID)).toBe(true);
   });
 

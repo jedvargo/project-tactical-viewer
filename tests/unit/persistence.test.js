@@ -58,7 +58,7 @@ describe("user/client persistence settings", () => {
     expect(clientKeys).toEqual(["renderQuality", "maxDevicePixelRatio"]);
     expect(SETTING_DEFINITIONS
       .filter(({ config }) => config.scope === "user")
-      .map(({ key }) => key)).toEqual([USER_LAYOUT_SETTING_KEY]);
+      .map(({ key }) => key)).toEqual([USER_LAYOUT_SETTING_KEY, "autoOpen"]);
   });
 
   it("loads validated defaults when the user setting is absent or corrupt", () => {

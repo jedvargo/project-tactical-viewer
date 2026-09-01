@@ -174,6 +174,7 @@ export function createTacticalViewerApplicationClass({
         document,
         devicePixelRatio,
         renderer,
+        onClosed,
         projectionEngine = new ProjectionEngine(),
         ...applicationOptions
       } = options;
@@ -197,6 +198,7 @@ export function createTacticalViewerApplicationClass({
         ? Math.max(1, devicePixelRatio)
         : Math.max(1, globalThis?.devicePixelRatio ?? 1);
       this.renderer = renderer;
+      this.onClosed = onClosed;
       this.projectionEngine = projectionEngine;
       this.state = makeState(scene, persistenceService, viewRegistry);
       this.viewport = { width: 0, height: 0 };
@@ -282,6 +284,53 @@ export function createTacticalViewerApplicationClass({
 
     getVisibleTacticalStates() {
       return this.tacticalStateService?.getVisibleTacticalStates?.(this.scene) ?? [];
+    }
+
+    /** Rebuild disposable view state from the current Scene TokenDocuments. */
+    refreshFromDocuments({ render = true } = {}) {
+      const states = this.getVisibleTacticalStates();
+      this.reconcileSelection(states);
+      this.updateSelectedTokenReadout(states);
+      this.updateInteractionControls(states);
+      if (render) this.requestRender({ type: "document-refresh" });
+      return states;
+    }
+
+    reconnect(options = {}) {
+      return this.refreshFromDocuments(options);
+    }
+
+    reconcileSelection(visibleTacticalStates) {
+      const visibleIds = new Set((visibleTacticalStates ?? []).map((state) => state?.tokenId));
+      if (this.state.links.selection) {
+        if (this.state.selectedTokenId !== null && !visibleIds.has(this.state.selectedTokenId)) {
+          this.state.selectedTokenId = null;
+        }
+        this.state.panels.forEach((panel) => {
+          panel.selectedTokenId = this.state.selectedTokenId;
+        });
+        return;
+      }
+      this.state.panels.forEach((panel) => {
+        if (panel.selectedTokenId !== null && !visibleIds.has(panel.selectedTokenId)) {
+          panel.selectedTokenId = null;
+        }
+      });
+      if (this.state.selectedTokenId !== null && !visibleIds.has(this.state.selectedTokenId)) {
+        this.state.selectedTokenId = null;
+      }
+    }
+
+    handleSynchronizationInvalidation(invalidation) {
+      const deletedIds = invalidation?.deletedTokenIds ?? [];
+      if (deletedIds.length > 0) {
+        const deleted = new Set(deletedIds);
+        if (deleted.has(this.state.selectedTokenId)) this.state.selectedTokenId = null;
+        this.state.panels.forEach((panel) => {
+          if (deleted.has(panel.selectedTokenId)) panel.selectedTokenId = null;
+        });
+      }
+      this.requestRender(invalidation);
     }
 
     buildRenderModel(
@@ -982,7 +1031,7 @@ export function createTacticalViewerApplicationClass({
       if (!this.unsubscribeSynchronization
         && typeof this.synchronizationCoordinator?.subscribe === "function") {
         this.unsubscribeSynchronization = this.synchronizationCoordinator.subscribe(
-          (invalidation) => this.requestRender(invalidation)
+          (invalidation) => this.handleSynchronizationInvalidation(invalidation)
         );
       }
 
@@ -1046,7 +1095,7 @@ export function createTacticalViewerApplicationClass({
     }
 
     renderViewport() {
-      const visibleTacticalStates = this.getVisibleTacticalStates();
+      const visibleTacticalStates = this.refreshFromDocuments({ render: false });
       this.updateSelectedTokenReadout(visibleTacticalStates);
       for (let panelIndex = 0; panelIndex < this.state.panelCount; panelIndex += 1) {
         const canvas = this.canvases[panelIndex];
@@ -1089,7 +1138,12 @@ export function createTacticalViewerApplicationClass({
     }
 
     async _preClose(options) {
-      this.teardown();
+      try {
+        await this.persistLayout();
+      } finally {
+        this.teardown();
+        this.onClosed?.(this, { source: "application" });
+      }
       return super._preClose?.(options);
     }
   };
