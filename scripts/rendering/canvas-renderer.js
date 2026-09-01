@@ -30,7 +30,15 @@ function formatSigned(value) {
   return value > 0 ? `+${value}` : String(value);
 }
 
-function cameraForTop({ grid, viewport, zoom, focus }) {
+function screenCenterFor(viewport, pan) {
+  const { width, height } = dimensionsOf(viewport);
+  return {
+    x: width / 2 + finiteOr(pan?.x, 0),
+    y: height / 2 + finiteOr(pan?.y, 0)
+  };
+}
+
+function cameraForTop({ grid, viewport, zoom, focus, pan }) {
   const { width, height } = dimensionsOf(viewport);
   const fitScale = Math.min(
     width / Math.max(1, grid.columns),
@@ -43,7 +51,7 @@ function cameraForTop({ grid, viewport, zoom, focus }) {
     // When omitted, retain the initial fit-to-panel behavior for callers that
     // have not opted into session navigation yet.
     scale: positiveOr(zoom, fitScale),
-    screenCenter: { x: width / 2, y: height / 2 }
+    screenCenter: screenCenterFor(viewport, pan)
   };
 }
 
@@ -59,12 +67,61 @@ function zBounds(tacticalStates = []) {
   };
 }
 
-function cameraForOrthographic({ definition, grid, viewport, zoom, focus, tacticalStates }) {
+function cameraForIsometric({ definition, grid, viewport, zoom, focus, pan, tacticalStates }) {
+  const { width, height } = dimensionsOf(viewport);
+  const bounds = zBounds(tacticalStates);
+  const defaultFocus = {
+    x: grid.columns / 2,
+    y: grid.rows / 2,
+    z: (bounds.min + bounds.max) / 2
+  };
+  const frame = [
+    [0, 0, bounds.min],
+    [grid.columns, 0, bounds.min],
+    [0, grid.rows, bounds.min],
+    [grid.columns, grid.rows, bounds.min],
+    [0, 0, bounds.max],
+    [grid.columns, 0, bounds.max],
+    [0, grid.rows, bounds.max],
+    [grid.columns, grid.rows, bounds.max]
+  ].map(([x, y, z]) => ({
+    x: x - defaultFocus.x,
+    y: y - defaultFocus.y,
+    z: z - defaultFocus.z
+  }));
+  const horizontalExtent = Math.max(
+    1,
+    Math.max(...frame.map((point) => point.x * definition.basis.right.x
+      + point.y * definition.basis.right.y
+      + point.z * definition.basis.right.z))
+      - Math.min(...frame.map((point) => point.x * definition.basis.right.x
+        + point.y * definition.basis.right.y
+        + point.z * definition.basis.right.z))
+  );
+  const verticalExtent = Math.max(
+    1,
+    Math.max(...frame.map((point) => point.x * definition.basis.up.x
+      + point.y * definition.basis.up.y
+      + point.z * definition.basis.up.z))
+      - Math.min(...frame.map((point) => point.x * definition.basis.up.x
+        + point.y * definition.basis.up.y
+        + point.z * definition.basis.up.z))
+  );
+  const fitScale = Math.min(width / horizontalExtent, height / verticalExtent);
+  return {
+    view: definition.id,
+    focus: focus ?? defaultFocus,
+    scale: positiveOr(zoom, fitScale),
+    screenCenter: screenCenterFor(viewport, pan)
+  };
+}
+
+function cameraForOrthographic({ definition, grid, viewport, zoom, focus, pan, tacticalStates }) {
   const { width, height } = dimensionsOf(viewport);
   const isTop = definition.visibleAxes.includes("y") && definition.hiddenAxis === "z";
   const horizontalAxis = definition.horizontal.axis;
   const horizontalExtent = horizontalAxis === "x" ? grid.columns : grid.rows;
-  if (isTop) return cameraForTop({ grid, viewport, zoom, focus });
+  if (isTop) return cameraForTop({ grid, viewport, zoom, focus, pan });
 
   const bounds = zBounds(tacticalStates);
   const fitScale = Math.min(
@@ -80,7 +137,7 @@ function cameraForOrthographic({ definition, grid, viewport, zoom, focus, tactic
     view: definition.id,
     focus: focus ?? defaultFocus,
     scale: positiveOr(zoom, fitScale),
-    screenCenter: { x: width / 2, y: height / 2 }
+    screenCenter: screenCenterFor(viewport, pan)
   };
 }
 
@@ -137,6 +194,41 @@ function projectedVerticalGrid({ grid, camera, projectionEngine, zRange, definit
   });
 }
 
+function projectedIsometricGrid({ grid, camera, projectionEngine, zRange }) {
+  const lines = [];
+  const addLine = (axis, start, end, major = false) => {
+    lines.push({
+      axis,
+      start: projectionEngine.projectPoint(start, camera),
+      end: projectionEngine.projectPoint(end, camera),
+      major
+    });
+  };
+
+  for (let z = zRange.min; z <= zRange.max; z += 1) {
+    for (let y = 0; y <= grid.rows; y += 1) {
+      addLine("x", { x: 0, y, z }, { x: grid.columns, y, z }, y === 0 || y === grid.rows);
+    }
+    for (let x = 0; x <= grid.columns; x += 1) {
+      addLine("y", { x, y: 0, z }, { x, y: grid.rows, z }, x === 0 || x === grid.columns);
+    }
+  }
+  for (let x = 0; x <= grid.columns; x += 1) {
+    for (let y = 0; y <= grid.rows; y += 1) {
+      addLine("z", { x, y, z: zRange.min }, { x, y, z: zRange.max },
+        x === 0 || x === grid.columns || y === 0 || y === grid.rows);
+    }
+  }
+
+  return Object.freeze({
+    columns: grid.columns,
+    rows: grid.rows,
+    zMin: zRange.min,
+    zMax: zRange.max,
+    lines: Object.freeze(lines)
+  });
+}
+
 function staticKey(model, width, height, dpr) {
   return [
     model.sceneId,
@@ -145,6 +237,8 @@ function staticKey(model, width, height, dpr) {
     model.camera.focus.x,
     model.camera.focus.y,
     model.camera.focus.z,
+    model.camera.screenCenter.x,
+    model.camera.screenCenter.y,
     width,
     height,
     dpr,
@@ -209,21 +303,40 @@ function createOrthographicRenderModel({
   viewport,
   zoom,
   focus,
+  pan,
   overlays = {},
   selectedTokenId = null,
   movementPreview = null
 } = {}) {
   const gridGeometry = coordinateAdapter.getTopGrid(scene);
   const definition = projectionEngine.describe(view);
-  const camera = cameraForOrthographic({
-    definition,
-    grid: gridGeometry,
-    viewport,
-    zoom,
-    focus,
-    tacticalStates
-  });
-  const grid = definition.visibleAxes.includes("z")
+  const camera = definition.basis
+    ? cameraForIsometric({
+      definition,
+      grid: gridGeometry,
+      viewport,
+      zoom,
+      focus,
+      pan,
+      tacticalStates
+    })
+    : cameraForOrthographic({
+      definition,
+      grid: gridGeometry,
+      viewport,
+      zoom,
+      focus,
+      pan,
+      tacticalStates
+    });
+  const grid = definition.basis
+    ? projectedIsometricGrid({
+      grid: gridGeometry,
+      camera,
+      projectionEngine,
+      zRange: zBounds(tacticalStates)
+    })
+    : definition.visibleAxes.includes("z")
     ? projectedVerticalGrid({
       grid: gridGeometry,
       camera,
@@ -283,12 +396,45 @@ export function createWestRenderModel(options = {}) {
   return createOrthographicRenderModel({ ...options, view: "west" });
 }
 
+export function createIsometricRenderModel(options = {}) {
+  const view = options.view ?? "iso-ne";
+  if (!view.startsWith("iso-")) {
+    throw new RangeError("An isometric view ID is required");
+  }
+  return createOrthographicRenderModel({ ...options, view });
+}
+
+export function createIsoNeRenderModel(options = {}) {
+  return createIsometricRenderModel({ ...options, view: "iso-ne" });
+}
+
+export function createIsoSeRenderModel(options = {}) {
+  return createIsometricRenderModel({ ...options, view: "iso-se" });
+}
+
+export function createIsoSwRenderModel(options = {}) {
+  return createIsometricRenderModel({ ...options, view: "iso-sw" });
+}
+
+export function createIsoNwRenderModel(options = {}) {
+  return createIsometricRenderModel({ ...options, view: "iso-nw" });
+}
+
 export const RENDERABLE_ORTHOGRAPHIC_VIEW_IDS = Object.freeze([
   "top", "north", "south", "east", "west"
 ]);
 
+export const RENDERABLE_VIEW_IDS = Object.freeze([
+  ...RENDERABLE_ORTHOGRAPHIC_VIEW_IDS,
+  "iso-ne", "iso-se", "iso-sw", "iso-nw"
+]);
+
 export function isRenderableOrthographicView(view) {
   return RENDERABLE_ORTHOGRAPHIC_VIEW_IDS.includes(view);
+}
+
+export function isRenderableView(view) {
+  return RENDERABLE_VIEW_IDS.includes(view);
 }
 
 /** Interface boundary for replaceable tactical Canvas2D renderers. */
@@ -322,7 +468,7 @@ function drawArrowHead(context, point, vector) {
   context.lineTo(right.x, right.y);
 }
 
-/** Concrete read-only schematic renderer for the currently renderable orthographic views. */
+/** Concrete read-only schematic renderer for all fixed tactical views. */
 export class Canvas2DRendererV1 extends Canvas2DRenderer {
   constructor({
     coordinateAdapter = new CoordinateAdapter(),
@@ -346,11 +492,12 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       viewport: input.viewport,
       zoom: panel.zoom,
       focus: panel.focus,
+      pan: panel.pan,
       overlays: panel.overlays,
       selectedTokenId: input?.selectedTokenId ?? input?.state?.selectedTokenId,
       movementPreview: input?.state?.movementPreview
     };
-    if (!isRenderableOrthographicView(panel.view)) return createTopRenderModel(modelOptions);
+    if (!isRenderableView(panel.view)) return createTopRenderModel(modelOptions);
     return createOrthographicRenderModel({ ...modelOptions, view: panel.view });
   }
 
@@ -363,7 +510,9 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     context.fillRect?.(0, 0, width, height);
     if (model.overlays.grid) {
       context.lineWidth = 1;
-      for (const line of [...model.grid.verticalLines, ...model.grid.horizontalLines]) {
+      const lines = model.grid.lines
+        ?? [...model.grid.verticalLines, ...model.grid.horizontalLines];
+      for (const line of lines) {
         context.beginPath?.();
         context.strokeStyle = line.major
           ? this.colors.gridMajor ?? DEFAULT_GRID_MAJOR
@@ -377,7 +526,8 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       context.font = "12px sans-serif";
       context.fillText?.(model.axisLabels.horizontal, 8, Math.max(14, height - 8));
       context.fillText?.(model.axisLabels.vertical, 8, 14);
-      context.fillText?.(`Hidden: ${model.axisLabels.hidden}`, Math.max(8, width - 132), 14);
+      const depthLabel = model.axisLabels.hidden ?? model.axisLabels.depth ?? "";
+      context.fillText?.(`Hidden: ${depthLabel}`, Math.max(8, width - 132), 14);
     }
     if (transform) context.restore?.();
   }

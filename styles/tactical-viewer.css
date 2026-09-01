@@ -45,6 +45,12 @@
   text-align: center;
 }
 
+.tactical-viewer-panel-toolbar [data-role="interaction-status"] {
+  color: #b9c8d1;
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+
 .tactical-viewer-overlay-options {
   background: #18232c;
   display: flex;

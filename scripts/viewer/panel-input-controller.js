@@ -203,6 +203,17 @@ export class PanelInputController {
 
   startTokenDrag(local, token) {
     const view = this.currentCamera().view;
+    if (view?.startsWith("iso-") && token?.visibleToCurrentUser !== false) {
+      this.onSelectionChanged?.(token?.tokenId ?? null, token ?? null);
+      if (token) {
+        this.element.style.cursor = "not-allowed";
+        this.onActionResult?.({
+          status: "read-only",
+          reason: "isometric-movement-disabled"
+        }, token);
+      }
+      return false;
+    }
     const definition = orthographicDefinition(this.projectionEngine, view);
     if (!definition
       || token?.visibleToCurrentUser === false
@@ -421,7 +432,17 @@ export class PanelInputController {
 
   panBy(delta) {
     const camera = this.currentCamera();
-    if (!camera.view || camera.view.startsWith("iso-")) return false;
+    if (!camera.view) return false;
+    if (camera.view.startsWith("iso-")) {
+      const currentPan = this.panel.pan ?? { x: 0, y: 0 };
+      const pan = {
+        x: finiteOr(currentPan.x, 0) + finiteOr(delta?.x, 0),
+        y: finiteOr(currentPan.y, 0) + finiteOr(delta?.y, 0)
+      };
+      this.panel.pan = pan;
+      this.notifyViewChanged({ type: "pan", pan });
+      return true;
+    }
     const center = camera.screenCenter;
     const nextFocus = this.projectionEngine.inversePoint({
       x: center.x - finiteOr(delta?.x, 0),
@@ -442,7 +463,13 @@ export class PanelInputController {
 
   zoomAt(screenPoint, factor) {
     const camera = this.currentCamera();
-    if (!camera.view || camera.view.startsWith("iso-")) return camera.scale;
+    if (!camera.view) return camera.scale;
+    if (camera.view.startsWith("iso-")) {
+      const zoom = clampLogicalZoom(camera.scale * finiteOr(factor, 1));
+      this.panel.zoom = zoom;
+      this.notifyViewChanged({ type: "zoom", zoom });
+      return zoom;
+    }
     const target = point(screenPoint);
     const targetWorld = this.projectionEngine.inversePoint(target, camera, {
       preserve: camera.focus
@@ -470,6 +497,7 @@ export class PanelInputController {
 
   resetView() {
     this.panel.focus = null;
+    this.panel.pan = { x: 0, y: 0 };
     this.panel.zoom = DEFAULT_LOGICAL_ZOOM;
     this.notifyViewChanged({
       type: "reset-view",

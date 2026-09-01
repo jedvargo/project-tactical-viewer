@@ -213,6 +213,20 @@ describe("Prompt 20 linked viewer state", () => {
     expect(application.state.panels.slice(0, 3).map(({ zoom }) => zoom)).toEqual([100, 200, 100]);
   });
 
+  it("links isometric screen-space center and logical zoom without changing 3D focus", async () => {
+    const { application } = await linkedApplication({ panelViews: ["iso-ne", "iso-sw"] });
+
+    pan(application, 0, { x: 30, y: -15 });
+    application.inputControllers[0].setZoom(120);
+
+    expect(application.state.sharedPan).toEqual({ x: 30, y: -15 });
+    expect(application.state.panels.slice(0, 2).map(({ pan }) => pan)).toEqual([
+      { x: 30, y: -15 }, { x: 30, y: -15 }
+    ]);
+    expect(application.state.panels.slice(0, 2).map(({ zoom }) => zoom)).toEqual([120, 120]);
+    expect(application.state.sharedFocus).toEqual({ x: 5, y: 5, z: 7 });
+  });
+
   it("persists the three link toggles without persisting transient focus or zoom", async () => {
     const { application } = await linkedApplication();
 

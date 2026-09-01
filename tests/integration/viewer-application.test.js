@@ -310,7 +310,7 @@ describe("TacticalViewerApplication", () => {
     expect(saved.splits).toEqual([0.28125, 0.5]);
   });
 
-  it("offers every renderable orthographic view and does not present deferred isometrics as active", async () => {
+  it("offers every fixed projection view, including all four isometrics", async () => {
     const scheduler = createScheduler();
     const document = createFakeDocument();
     const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
@@ -327,7 +327,40 @@ describe("TacticalViewerApplication", () => {
 
     const select = application.element.querySelector('[data-role="view-select"]');
     expect(select.children.map((option) => option.value)).toEqual([
-      "top", "north", "south", "east", "west"
+      "top", "north", "south", "east", "west",
+      "iso-ne", "iso-se", "iso-sw", "iso-nw"
+    ]);
+  });
+
+  it("keeps all four isometric choices active in every panel dropdown", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService: {
+        getSceneLayout: () => ({
+          panelCount: 4,
+          panels: [{ view: "iso-ne" }, { view: "iso-se" }, { view: "iso-sw" }, { view: "iso-nw" }]
+        })
+      },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+
+    expect(application.element.querySelectorAll('[data-role="view-select"]')).toHaveLength(4);
+    for (const select of application.element.querySelectorAll('[data-role="view-select"]')) {
+      expect(select.children.map((option) => option.value)).toEqual([
+        "top", "north", "south", "east", "west",
+        "iso-ne", "iso-se", "iso-sw", "iso-nw"
+      ]);
+    }
+    expect(application.state.panels.map(({ view }) => view)).toEqual([
+      "iso-ne", "iso-se", "iso-sw", "iso-nw"
     ]);
   });
 

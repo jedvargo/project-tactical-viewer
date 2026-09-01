@@ -235,13 +235,15 @@ A prompt may be marked complete only after its focused tests, full automated sui
 ## Isometric and artwork
 
 ### P21 — Isometric viewer
-- [ ] Render NE.
-- [ ] Render SE.
-- [ ] Render SW.
-- [ ] Render NW.
-- [ ] Project authoritative heading/pitch vector.
-- [ ] Selection/pan/zoom only.
-- [ ] No direct isometric movement.
+- [x] Render NE.
+- [x] Render SE.
+- [x] Render SW.
+- [x] Render NW.
+- [x] Project authoritative heading/pitch vector.
+- [x] Selection/pan/zoom only.
+- [x] No direct isometric movement.
+- [!] Manual Foundry v14 three-token isometric smoke check.
+  - Blocked: no linked or installed Foundry VTT v14 executable/test World was available for the requested Top/North/Isometric formation and orthographic heading/pitch comparison.
 
 ### P22 — Depth and overlapping tokens
 - [ ] Deterministic isometric depth sort.

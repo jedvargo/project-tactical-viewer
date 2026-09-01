@@ -1,6 +1,6 @@
 import { ALLOWED_PITCHES, MODULE_ID } from "../constants.js";
 import { ProjectionEngine } from "../projection/projection-engine.js";
-import { isRenderableOrthographicView } from "../rendering/canvas-renderer.js";
+import { isRenderableView } from "../rendering/canvas-renderer.js";
 import { VIEW_REGISTRY } from "../view-registry.js";
 import {
   MIN_PANEL_HEIGHT,
@@ -52,7 +52,7 @@ function documentFor(options) {
 
 function viewFor(layout, index, registry) {
   const requested = layout?.panels?.[index]?.view;
-  return registry.has(requested) && isRenderableOrthographicView(requested) ? requested : "top";
+  return registry.has(requested) && isRenderableView(requested) ? requested : "top";
 }
 
 function layoutFor(scene, persistenceService) {
@@ -66,12 +66,24 @@ function cloneFocus(focus) {
   return { x: focus.x, y: focus.y, z: focus.z };
 }
 
+function clonePan(pan) {
+  return {
+    x: Number.isFinite(pan?.x) ? pan.x : 0,
+    y: Number.isFinite(pan?.y) ? pan.y : 0
+  };
+}
+
+function isometricView(view) {
+  return typeof view === "string" && view.startsWith("iso-");
+}
+
 function makeState(scene, persistenceService, registry) {
   const layout = normalizePanelLayout(layoutFor(scene, persistenceService));
   return {
     selectedTokenId: null,
     movementPreview: null,
     sharedFocus: null,
+    sharedPan: { x: 0, y: 0 },
     sharedZoom: DEFAULT_LOGICAL_ZOOM,
     panelCount: layout.panelCount,
     splits: layout.splits.slice(),
@@ -81,10 +93,9 @@ function makeState(scene, persistenceService, registry) {
       zoom: layout.links?.zoom ?? true
     },
     panels: layout.panels.map((panel, index) => ({
-      // Isometric rendering is intentionally deferred to P21. Keep the
-      // persisted choice in the service, but expose a safe active view here.
       view: viewFor(layout, index, registry),
       dimensions: { width: 0, height: 0 },
+      pan: { x: 0, y: 0 },
       // Transient session state is intentionally not read from persistence.
       zoom: DEFAULT_LOGICAL_ZOOM,
       focus: null,
@@ -104,6 +115,9 @@ function sceneTokenById(scene, tokenId) {
 
 function actionMessage(result) {
   if (result?.status === "conflict") return "Token changed remotely; movement canceled.";
+  if (result?.reason === "isometric-movement-disabled") {
+    return "Isometric views are read-only; move tokens from an orthographic view.";
+  }
   if (result?.reason === "rotation-locked") return "Token rotation is locked.";
   if (result?.reason === "locked") return "Token movement is locked.";
   if (result?.reason === "permission") return "You cannot update this token.";
@@ -248,6 +262,7 @@ export function createTacticalViewerApplicationClass({
       return {
         ...panel,
         focus: this.state.links.center ? this.getSharedFocus() : panel.focus,
+        pan: this.state.links.center ? clonePan(this.state.sharedPan) : clonePan(panel.pan),
         zoom: this.state.links.zoom
           ? this.state.sharedZoom
           : panel.zoom
@@ -397,6 +412,13 @@ export function createTacticalViewerApplicationClass({
         this.state.sharedFocus = focus;
         this.state.panels.forEach((panel) => { panel.focus = { ...focus }; });
       }
+      const pan = this.state.links.center && !wasLinked
+        ? clonePan(this.state.panels[0]?.pan)
+        : clonePan(this.state.sharedPan);
+      this.state.sharedPan = pan;
+      if (this.state.links.center) {
+        this.state.panels.forEach((panel) => { panel.pan = { ...pan }; });
+      }
       this.updateLinkControls();
       await this.persistLayout();
       this.requestRender({ type: "link-center", enabled: this.state.links.center });
@@ -429,7 +451,14 @@ export function createTacticalViewerApplicationClass({
     handlePanelViewChanged(panelIndex, change) {
       const panel = this.state.panels[panelIndex];
       if (!panel || !change) return;
-      if (change.type === "pan" && change.focus) {
+      if (change.type === "pan" && change.pan) {
+        const pan = clonePan(change.pan);
+        panel.pan = pan;
+        if (this.state.links.center) {
+          this.state.sharedPan = pan;
+          this.state.panels.forEach((entry) => { entry.pan = { ...pan }; });
+        }
+      } else if (change.type === "pan" && change.focus) {
         const focus = cloneFocus(change.focus);
         if (focus) {
           panel.focus = focus;
@@ -440,9 +469,12 @@ export function createTacticalViewerApplicationClass({
         }
       } else if (change.type === "reset-view") {
         panel.focus = null;
+        panel.pan = { x: 0, y: 0 };
         if (this.state.links.center) {
           this.state.sharedFocus = null;
+          this.state.sharedPan = { x: 0, y: 0 };
           this.state.panels.forEach((entry) => { entry.focus = null; });
+          this.state.panels.forEach((entry) => { entry.pan = { x: 0, y: 0 }; });
         }
       }
 
@@ -483,7 +515,7 @@ export function createTacticalViewerApplicationClass({
       if (!Number.isInteger(index) || index < 0 || index >= this.state.panels.length) {
         return false;
       }
-      if (!this.viewRegistry.has(view) || !isRenderableOrthographicView(view)) return false;
+      if (!this.viewRegistry.has(view) || !isRenderableView(view)) return false;
       this.state.panels[index].view = view;
       await this.persistLayout();
       this.updatePanelControls(index);
@@ -561,6 +593,26 @@ export function createTacticalViewerApplicationClass({
       if (!panelElement || !panel) return;
       const select = panelElement.querySelector?.('[data-role="view-select"]');
       if (select) select.value = panel.view;
+      const canvas = this.canvases[index];
+      const readOnly = isometricView(panel.view);
+      const status = panelElement.querySelector?.('[data-role="interaction-status"]');
+      if (status) {
+        status.textContent = readOnly
+          ? "Read-only: drag pans; token movement is disabled"
+          : "Token movement enabled";
+      }
+      if (canvas) {
+        canvas.style.cursor = readOnly ? "grab" : "default";
+        canvas.setAttribute?.(
+          "aria-description",
+          readOnly
+            ? "Isometric view is read-only for token movement; dragging pans the view."
+            : "Dragging a visible token moves it on this projection's axes."
+        );
+        canvas.title = readOnly
+          ? "Read-only isometric view: drag to pan; move tokens from an orthographic view."
+          : "Drag to pan or move a visible token.";
+      }
       for (const key of Object.keys(DEFAULT_OVERLAYS)) {
         const checkbox = panelElement.querySelector?.(`[data-role="overlay-${key}"]`);
         if (checkbox) checkbox.checked = panel.overlays[key] === true;
@@ -740,7 +792,7 @@ export function createTacticalViewerApplicationClass({
         const viewSelect = this.domDocument.createElement("select");
         viewSelect.setAttribute?.("aria-label", `Panel ${index + 1} projection`);
         setRole(viewSelect, "view-select");
-        for (const view of this.viewRegistry.list().filter(({ id }) => isRenderableOrthographicView(id))) {
+        for (const view of this.viewRegistry.list().filter(({ id }) => isRenderableView(id))) {
           const option = this.domDocument.createElement("option");
           option.value = view.id;
           option.textContent = view.name;
@@ -771,6 +823,8 @@ export function createTacticalViewerApplicationClass({
           if (ALLOWED_PITCHES.includes(pitch)) this.setPitchTo(pitch);
         });
         const optionsButton = makeButton(this.domDocument, "Options", "panel-options", "Panel options");
+        const interactionStatus = this.domDocument.createElement("span");
+        setRole(interactionStatus, "interaction-status");
         const options = this.domDocument.createElement("div");
         addClass(options, "tactical-viewer-overlay-options");
         options.hidden = true;
@@ -791,7 +845,8 @@ export function createTacticalViewerApplicationClass({
         }
         panelToolbar.append(
           viewSelect, zoomOut, zoomLabel, zoomIn, resetView,
-          headingDecrease, headingIncrease, pitchSelect, optionsButton, options
+          headingDecrease, headingIncrease, pitchSelect, optionsButton, options,
+          interactionStatus
         );
 
         const canvas = this.domDocument.createElement("canvas");
@@ -803,6 +858,7 @@ export function createTacticalViewerApplicationClass({
         this.panelElements.push(panel);
         this.canvases.push(canvas);
         const controller = this.createPanelInputController(index);
+        this.updatePanelControls(index);
         zoomOut.addEventListener?.("click", () => controller?.zoomOut());
         zoomIn.addEventListener?.("click", () => controller?.zoomIn());
         resetView.addEventListener?.("click", () => controller?.resetView());
