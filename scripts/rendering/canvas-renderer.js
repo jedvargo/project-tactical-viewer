@@ -30,7 +30,7 @@ function formatSigned(value) {
   return value > 0 ? `+${value}` : String(value);
 }
 
-function cameraForTop({ grid, viewport, zoom = 1, focus }) {
+function cameraForTop({ grid, viewport, zoom, focus }) {
   const { width, height } = dimensionsOf(viewport);
   const fitScale = Math.min(
     width / Math.max(1, grid.columns),
@@ -39,7 +39,10 @@ function cameraForTop({ grid, viewport, zoom = 1, focus }) {
   return {
     view: "top",
     focus: focus ?? { x: grid.columns / 2, y: grid.rows / 2, z: 0 },
-    scale: positiveOr(fitScale * positiveOr(zoom, 1), 1),
+    // `zoom` is the logical tactical scale: CSS pixels per tactical cell.
+    // When omitted, retain the initial fit-to-panel behavior for callers that
+    // have not opted into session navigation yet.
+    scale: positiveOr(zoom, fitScale),
     screenCenter: { x: width / 2, y: height / 2 }
   };
 }
@@ -98,6 +101,7 @@ function visibleToken(state, projectionEngine, camera, viewport) {
   );
   return Object.freeze({
     tokenId: state.tokenId,
+    visibleToCurrentUser: true,
     name: typeof state.name === "string" ? state.name : "",
     tacticalX: state.tacticalX,
     tacticalY: state.tacticalY,
@@ -125,7 +129,7 @@ export function createTopRenderModel({
   projectionEngine = new ProjectionEngine(),
   tacticalStates = [],
   viewport,
-  zoom = 1,
+  zoom,
   focus,
   overlays = {},
   selectedTokenId = null
@@ -212,7 +216,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       projectionEngine: this.projectionEngine,
       tacticalStates: input.visibleTacticalStates,
       viewport: input.viewport,
-      zoom: panel.scale,
+      zoom: panel.zoom,
       focus: panel.focus,
       overlays: panel.overlays,
       selectedTokenId: input?.state?.selectedTokenId

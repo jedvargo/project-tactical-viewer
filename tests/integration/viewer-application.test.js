@@ -296,4 +296,82 @@ describe("TacticalViewerApplication", () => {
       visibleTacticalStates: visibleStates
     }));
   });
+
+  it("wires local Pointer Event selection, zoom/reset controls, and the readout", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const projectedToken = {
+      tokenId: "visible",
+      name: "Aurora",
+      point: { x: 100, y: 100 },
+      markerRadius: 20,
+      visibleToCurrentUser: true
+    };
+    const renderer = {
+      buildModel: vi.fn(() => ({
+        view: "top",
+        camera: {
+          view: "top",
+          focus: { x: 5, y: 5, z: 0 },
+          scale: 64,
+          screenCenter: { x: 200, y: 150 }
+        },
+        tokens: [projectedToken]
+      })),
+      render: vi.fn()
+    };
+    const tacticalStateService = {
+      getVisibleTacticalStates: vi.fn(() => [{
+        tokenId: "visible",
+        name: "Aurora",
+        tacticalX: 2.5,
+        tacticalY: 1.5,
+        tacticalZ: 0,
+        visibleToCurrentUser: true,
+        participating: true
+      }])
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      tacticalStateService,
+      renderer,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    scheduler.flush();
+    const canvas = application.element.querySelector("canvas");
+    const readout = application.element.querySelector('[data-role="selected-token-readout"]');
+    canvas.dispatchEvent({
+      type: "pointerdown",
+      pointerId: 1,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      preventDefault: vi.fn()
+    });
+    canvas.dispatchEvent({
+      type: "pointerup",
+      pointerId: 1,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      preventDefault: vi.fn()
+    });
+
+    expect(application.state.selectedTokenId).toBe("visible");
+    expect(readout.textContent).toContain("Selected Aurora");
+    expect(application.state.panels[0].zoom).toBe(64);
+
+    application.element.querySelector('[data-role="zoom-in"]').dispatchEvent({ type: "click" });
+    expect(application.state.panels[0].zoom).toBe(80);
+    application.element.querySelector('[data-role="reset-view"]').dispatchEvent({ type: "click" });
+    expect(application.state.panels[0].zoom).toBe(64);
+    expect(application.state.panels[0].focus).toBeNull();
+  });
 });

@@ -163,13 +163,15 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: no installed or linked Foundry VTT v14 executable/test World was available for the required visual 1x1 and 2x2 token-center comparison; automated renderer and runtime coverage passed.
 
 ### P15 — Selection/pan/zoom
-- [ ] Local tactical selection.
-- [ ] Pointer hit testing.
-- [ ] Pan.
-- [ ] Zoom.
-- [ ] Reset view.
-- [ ] No native token `control()` side effect.
-- [ ] Hidden tokens excluded from hit testing.
+- [x] Local tactical selection.
+- [x] Pointer hit testing.
+- [x] Pan.
+- [x] Zoom.
+- [x] Reset view.
+- [x] No native token `control()` side effect.
+- [x] Hidden tokens excluded from hit testing.
+- [!] Real Foundry v14 selection/pan/zoom smoke test.
+  - Blocked: no installed or linked Foundry VTT v14 executable/test World was available; automated controller and ApplicationV2-shaped coverage passed.
 
 ### P16 — Top movement + heading
 - [ ] Local movement preview.

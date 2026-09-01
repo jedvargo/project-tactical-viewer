@@ -158,6 +158,7 @@ export function createRuntime({
         persistenceService: resolvedPersistenceService,
         synchronizationCoordinator: resolvedSynchronizationCoordinator,
         tacticalStateService: resolvedTacticalStateService,
+        projectionEngine,
         renderer: applicationConfiguration.renderer ?? resolvedRenderer
       });
 

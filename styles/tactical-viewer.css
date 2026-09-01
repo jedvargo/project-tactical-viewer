@@ -38,5 +38,12 @@
 .tactical-viewer-canvas {
   display: block;
   height: 100%;
+  touch-action: none;
   width: 100%;
+}
+
+.tactical-viewer-selected-token-readout {
+  flex: 0 0 auto;
+  min-height: 1.25rem;
+  padding: 0.15rem 0.35rem;
 }

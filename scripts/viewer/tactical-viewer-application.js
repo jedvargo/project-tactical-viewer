@@ -1,5 +1,10 @@
 import { MODULE_ID } from "../constants.js";
+import { ProjectionEngine } from "../projection/projection-engine.js";
 import { VIEW_REGISTRY } from "../view-registry.js";
+import {
+  DEFAULT_LOGICAL_ZOOM,
+  PanelInputController
+} from "./panel-input-controller.js";
 
 function defaultFrameScheduler(callback) {
   if (typeof globalThis?.requestAnimationFrame === "function") {
@@ -57,7 +62,9 @@ function makeState(scene, persistenceService, registry) {
     panels: [{
       view: viewFor(layout, registry),
       dimensions: { width: 0, height: 0 },
-      scale: 1,
+      // Transient session state is intentionally not read from persistence.
+      zoom: DEFAULT_LOGICAL_ZOOM,
+      focus: null,
       overlays: { ...(layout.panels?.[0]?.overlays ?? {}) }
     }]
   };
@@ -72,11 +79,11 @@ function setRole(element, role) {
   element.setAttribute?.("data-role", role);
 }
 
-function makeButton(document, label, role) {
+function makeButton(document, label, role, ariaLabel = label) {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = label;
-  button.setAttribute?.("aria-label", label);
+  button.setAttribute?.("aria-label", ariaLabel);
   if (role) setRole(button, role);
   return button;
 }
@@ -110,6 +117,7 @@ export function createTacticalViewerApplicationClass({
         document,
         devicePixelRatio,
         renderer,
+        projectionEngine = new ProjectionEngine(),
         ...applicationOptions
       } = options;
 
@@ -130,6 +138,7 @@ export function createTacticalViewerApplicationClass({
         ? Math.max(1, devicePixelRatio)
         : Math.max(1, globalThis?.devicePixelRatio ?? 1);
       this.renderer = renderer;
+      this.projectionEngine = projectionEngine;
       this.state = makeState(scene, persistenceService, viewRegistry);
       this.viewport = { width: 0, height: 0 };
       this.renderCount = 0;
@@ -140,6 +149,9 @@ export function createTacticalViewerApplicationClass({
       this.resizeObserver = undefined;
       this.canvas = undefined;
       this.panelElement = undefined;
+      this.zoomLabel = undefined;
+      this.selectedTokenReadout = undefined;
+      this.inputController = undefined;
       this.attached = false;
     }
 
@@ -151,10 +163,73 @@ export function createTacticalViewerApplicationClass({
       return { ...this.viewport };
     }
 
+    getVisibleTacticalStates() {
+      return this.tacticalStateService?.getVisibleTacticalStates?.(this.scene) ?? [];
+    }
+
+    buildRenderModel(visibleTacticalStates = this.getVisibleTacticalStates()) {
+      return this.renderer?.buildModel?.({
+        canvas: this.canvas,
+        context: this.canvas?.getContext?.("2d"),
+        scene: this.scene,
+        viewport: this.getViewportDimensions(),
+        state: this.state,
+        devicePixelRatio: this.devicePixelRatio,
+        visibleTacticalStates
+      }) ?? null;
+    }
+
+    updateZoomLabel() {
+      if (this.zoomLabel) {
+        this.zoomLabel.textContent = `${Math.round(this.state.panels[0].zoom)} px/cell`;
+      }
+    }
+
+    updateSelectedTokenReadout(visibleTacticalStates = this.getVisibleTacticalStates()) {
+      if (!this.selectedTokenReadout) return;
+      const states = Array.isArray(visibleTacticalStates) ? visibleTacticalStates : [];
+      const selected = states.find((state) =>
+        state?.tokenId === this.state.selectedTokenId
+      );
+      if (!selected) {
+        if (this.state.selectedTokenId !== null) this.state.selectedTokenId = null;
+        this.selectedTokenReadout.textContent = "No tactical token selected";
+        return;
+      }
+      const label = selected.name || selected.tokenId;
+      this.selectedTokenReadout.textContent = [
+        `Selected ${label}`,
+        `X ${selected.tacticalX}`,
+        `Y ${selected.tacticalY}`,
+        `Z ${selected.tacticalZ}`
+      ].join(" · ");
+    }
+
+    handleSelectionChanged(tokenId) {
+      this.state.selectedTokenId = tokenId;
+      this.updateSelectedTokenReadout();
+    }
+
+    createInputController() {
+      if (!this.canvas || this.inputController) return this.inputController;
+      this.inputController = new PanelInputController({
+        element: this.canvas,
+        panel: this.state.panels[0],
+        projectionEngine: this.projectionEngine,
+        getRenderModel: () => this.buildRenderModel(),
+        onSelectionChanged: (tokenId) => this.handleSelectionChanged(tokenId),
+        onViewChanged: () => this.updateZoomLabel(),
+        requestRender: (invalidation) => this.requestRender(invalidation)
+      });
+      return this.inputController;
+    }
+
     async _renderHTML() {
       if (!this.domDocument?.createElement) {
         throw new Error("TacticalViewerApplication requires a browser document to render");
       }
+      this.inputController?.detach?.();
+      this.inputController = undefined;
 
       const root = this.domDocument.createElement("div");
       addClass(root, "tactical-viewer-shell");
@@ -180,13 +255,14 @@ export function createTacticalViewerApplicationClass({
         }
       });
 
-      const zoomOut = makeButton(this.domDocument, "−", "zoom-out");
+      const zoomOut = makeButton(this.domDocument, "−", "zoom-out", "Zoom out");
       const zoomLabel = this.domDocument.createElement("span");
-      zoomLabel.textContent = "100%";
+      zoomLabel.textContent = `${this.state.panels[0].zoom} px/cell`;
       setRole(zoomLabel, "zoom-label");
-      const zoomIn = makeButton(this.domDocument, "+", "zoom-in");
-      const optionsButton = makeButton(this.domDocument, "Options", "panel-options");
-      toolbar.append(viewSelect, zoomOut, zoomLabel, zoomIn, optionsButton);
+      const zoomIn = makeButton(this.domDocument, "+", "zoom-in", "Zoom in");
+      const resetView = makeButton(this.domDocument, "Reset", "reset-view", "Reset view");
+      const optionsButton = makeButton(this.domDocument, "Options", "panel-options", "Panel options");
+      toolbar.append(viewSelect, zoomOut, zoomLabel, zoomIn, resetView, optionsButton);
 
       const panel = this.domDocument.createElement("section");
       addClass(panel, "tactical-viewer-panel");
@@ -196,10 +272,23 @@ export function createTacticalViewerApplicationClass({
       setRole(canvas, "canvas");
       canvas.setAttribute?.("aria-label", "Tactical projection canvas");
       panel.appendChild(canvas);
+      const selectedTokenReadout = this.domDocument.createElement("div");
+      addClass(selectedTokenReadout, "tactical-viewer-selected-token-readout");
+      selectedTokenReadout.setAttribute?.("aria-live", "polite");
+      selectedTokenReadout.setAttribute?.("aria-atomic", "true");
+      setRole(selectedTokenReadout, "selected-token-readout");
+      selectedTokenReadout.textContent = "No tactical token selected";
       root.append(toolbar, panel);
+      root.appendChild(selectedTokenReadout);
 
       this.canvas = canvas;
       this.panelElement = panel;
+      this.zoomLabel = zoomLabel;
+      this.selectedTokenReadout = selectedTokenReadout;
+      const controller = this.createInputController();
+      zoomOut.addEventListener?.("click", () => controller?.zoomOut());
+      zoomIn.addEventListener?.("click", () => controller?.zoomIn());
+      resetView.addEventListener?.("click", () => controller?.resetView());
       return root;
     }
 
@@ -216,6 +305,8 @@ export function createTacticalViewerApplicationClass({
       }
 
       this.attached = true;
+      this.updateZoomLabel();
+      this.updateSelectedTokenReadout();
       this.updateViewport();
       this.requestRender({ type: "initial" });
     }
@@ -268,6 +359,8 @@ export function createTacticalViewerApplicationClass({
       if (!this.canvas) return false;
       const context = this.canvas.getContext?.("2d");
       context?.clearRect?.(0, 0, this.canvas.width, this.canvas.height);
+      const visibleTacticalStates = this.getVisibleTacticalStates();
+      this.updateSelectedTokenReadout(visibleTacticalStates);
       const renderInput = {
         canvas: this.canvas,
         context,
@@ -275,7 +368,7 @@ export function createTacticalViewerApplicationClass({
         viewport: this.getViewportDimensions(),
         state: this.state,
         devicePixelRatio: this.devicePixelRatio,
-        visibleTacticalStates: this.tacticalStateService?.getVisibleTacticalStates?.(this.scene) ?? [],
+        visibleTacticalStates,
         invalidation: this.lastInvalidation
       };
       if (typeof this.renderer === "function") this.renderer(renderInput);
@@ -291,6 +384,8 @@ export function createTacticalViewerApplicationClass({
       this.renderScheduled = false;
       this.scheduledHandle = undefined;
       this.detachResizeObserver();
+      this.inputController?.detach?.();
+      this.inputController = undefined;
       this.unsubscribeSynchronization?.();
       this.unsubscribeSynchronization = undefined;
       this.attached = false;
