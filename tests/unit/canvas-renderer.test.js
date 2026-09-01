@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   Canvas2DRendererV1,
   createNorthRenderModel,
+  createSouthRenderModel,
   createTopRenderModel
 } from "../../scripts/rendering/canvas-renderer.js";
 import { AssetManager } from "../../scripts/rendering/asset-manager.js";
@@ -25,6 +26,9 @@ function fakeContext() {
     stroke: vi.fn(() => calls.push(["stroke"])),
     arc: vi.fn((...args) => calls.push(["arc", ...args])),
     drawImage: vi.fn((...args) => calls.push(["drawImage", ...args])),
+    translate: vi.fn((...args) => calls.push(["translate", ...args])),
+    rotate: vi.fn((...args) => calls.push(["rotate", ...args])),
+    scale: vi.fn((...args) => calls.push(["scale", ...args])),
     fill: vi.fn(() => calls.push(["fill"])),
     fillText: vi.fn((...args) => calls.push(["fillText", ...args])),
     setLineDash: vi.fn((...args) => calls.push(["setLineDash", ...args]))
@@ -152,6 +156,105 @@ describe("Canvas2DRendererV1", () => {
 
     expect(secondContext.calls.some(([name]) => name === "drawImage")).toBe(true);
     expect(secondContext.calls.some(([name]) => name === "lineTo")).toBe(true);
+  });
+
+  it("uses custom art through AssetManager and applies forward offset only to drawing", () => {
+    const imageSource = { source: "custom.webp" };
+    const assetManager = {
+      peekArt: vi.fn(() => ({
+        image: imageSource,
+        source: "custom.webp",
+        mirrored: false,
+        forwardOffset: 90
+      })),
+      loadArt: vi.fn()
+    };
+    const currentScene = scene();
+    const model = createTopRenderModel({
+      scene: currentScene,
+      coordinateAdapter: new CoordinateAdapter(),
+      projectionEngine: new ProjectionEngine(),
+      tacticalStates: [state({ heading: 0, art: { icon: "custom.webp", forwardOffset: 90 } })],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+    const context = fakeContext();
+
+    new Canvas2DRendererV1({ assetManager }).render({
+      canvas: { width: 1200, height: 800 },
+      context,
+      viewport: { width: 600, height: 400 },
+      devicePixelRatio: 2,
+      model
+    });
+
+    expect(model.tokens[0].heading).toBe(0);
+    expect(assetManager.peekArt).toHaveBeenCalledWith(model.tokens[0].art, "top");
+    expect(context.calls).toContainEqual(["drawImage", imageSource, -12, -12, 24, 24]);
+    expect(context.calls.some(([name, value]) => name === "rotate" && value !== 0)).toBe(true);
+  });
+
+  it("requests unresolved custom art from AssetManager instead of loading a path directly", async () => {
+    const assetManager = {
+      peekArt: vi.fn(() => null),
+      loadArt: vi.fn(async () => null)
+    };
+    const currentScene = scene();
+    const model = createTopRenderModel({
+      scene: currentScene,
+      coordinateAdapter: new CoordinateAdapter(),
+      projectionEngine: new ProjectionEngine(),
+      tacticalStates: [state({ art: { icon: "custom.webp" } })],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+
+    new Canvas2DRendererV1({ assetManager }).render({
+      canvas: { width: 1200, height: 800 },
+      context: fakeContext(),
+      viewport: { width: 600, height: 400 },
+      devicePixelRatio: 2,
+      model,
+      invalidate: vi.fn()
+    });
+
+    expect(assetManager.loadArt).toHaveBeenCalledWith(model.tokens[0].art, "top");
+    expect(assetManager.loadPreset).toBeUndefined();
+  });
+
+  it("draws opted-in mirrored artwork with a negative canvas scale", () => {
+    const imageSource = { source: "north.webp" };
+    const assetManager = {
+      peekArt: vi.fn(() => ({
+        image: imageSource,
+        source: "north.webp",
+        mirrored: true,
+        forwardOffset: 0
+      })),
+      loadArt: vi.fn()
+    };
+    const model = createSouthRenderModel({
+      scene: scene(),
+      coordinateAdapter: new CoordinateAdapter(),
+      projectionEngine: new ProjectionEngine(),
+      tacticalStates: [state({ art: { views: { north: "north.webp" } } })],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+    const context = fakeContext();
+
+    new Canvas2DRendererV1({ assetManager }).render({
+      canvas: { width: 1200, height: 800 },
+      context,
+      viewport: { width: 600, height: 400 },
+      devicePixelRatio: 2,
+      model
+    });
+
+    expect(context.calls).toContainEqual(["scale", -1, 1]);
   });
 
   it("builds a North X/Z model with +Z upward and explicit axis labels", () => {

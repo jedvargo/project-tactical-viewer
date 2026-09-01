@@ -1,4 +1,4 @@
-import { MODULE_ID } from "../constants.js";
+import { MODULE_ID, VIEW_DEFINITIONS } from "../constants.js";
 
 /** Module-owned static tactical artwork. These are references, not executable data. */
 export const GENERIC_ASSET_PATHS = Object.freeze({
@@ -26,9 +26,72 @@ const PRESET_ALIASES = Object.freeze({
   "generic-marker": "marker"
 });
 
+const VIEW_IDS = new Set(VIEW_DEFINITIONS.map(({ id }) => id));
+const MIRROR_PAIRS = Object.freeze({
+  north: Object.freeze({ opposite: "south", enabledBy: "northSouth" }),
+  south: Object.freeze({ opposite: "north", enabledBy: "northSouth" }),
+  east: Object.freeze({ opposite: "west", enabledBy: "eastWest" }),
+  west: Object.freeze({ opposite: "east", enabledBy: "eastWest" })
+});
+
 function normalizedPreset(preset) {
   const key = typeof preset === "string" ? preset.trim().toLowerCase() : "";
   return PRESET_ALIASES[key] ?? "marker";
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function artConfig(value) {
+  const art = isRecord(value) ? value : {};
+  return {
+    preset: typeof art.preset === "string" && art.preset ? art.preset : "generic-ship",
+    icon: typeof art.icon === "string" ? art.icon.trim() : "",
+    forwardOffset: typeof art.forwardOffset === "number" && Number.isFinite(art.forwardOffset)
+      ? art.forwardOffset
+      : 0,
+    mirror: isRecord(art.mirror) ? art.mirror : {},
+    views: isRecord(art.views) ? art.views : {}
+  };
+}
+
+function addCandidate(candidates, seen, source, mirrored, level) {
+  if (typeof source !== "string" || !source.trim() || seen.has(source)) return;
+  seen.add(source);
+  candidates.push(Object.freeze({
+    source: source.trim(),
+    mirrored,
+    level
+  }));
+}
+
+/**
+ * Return the contract-defined artwork fallback chain without loading anything.
+ * Paths are retained as inert data and are only handed to AssetManager.load().
+ */
+export function getTacticalArtCandidates(value, view) {
+  const art = artConfig(value);
+  const candidates = [];
+  const seen = new Set();
+  const exact = VIEW_IDS.has(view) ? art.views[view] : "";
+  addCandidate(candidates, seen, exact, false, "view");
+
+  const mirror = MIRROR_PAIRS[view];
+  if (mirror?.enabledBy && art.mirror[mirror.enabledBy] === true) {
+    addCandidate(candidates, seen, art.views[mirror.opposite], true, "mirrored-view");
+  }
+
+  addCandidate(candidates, seen, art.icon, false, "icon");
+  addCandidate(
+    candidates,
+    seen,
+    GENERIC_ASSET_PATHS[normalizedPreset(art.preset)],
+    false,
+    "preset"
+  );
+  addCandidate(candidates, seen, GENERIC_ASSET_PATHS.marker, false, "marker");
+  return Object.freeze(candidates);
 }
 
 function defaultImageFactory() {
@@ -98,6 +161,62 @@ export class AssetManager {
     const selectedValue = this.peek(GENERIC_ASSET_PATHS[selected]);
     if (selectedValue) return selectedValue;
     if (selected !== "marker") return this.peek(GENERIC_ASSET_PATHS.marker);
+    return null;
+  }
+
+  /**
+   * Return the first already-decoded art candidate. A loading higher-priority
+   * candidate deliberately blocks lower candidates until its result is known,
+   * preserving the documented fallback order across redraws.
+   */
+  peekArt(art, view) {
+    for (const candidate of getTacticalArtCandidates(art, view)) {
+      let status;
+      try {
+        status = this.getStatus(candidate.source);
+      } catch {
+        status = "failed";
+      }
+      if (status === "loading") return null;
+      if (status !== "ready") continue;
+      const value = this.peek(candidate.source);
+      if (value) {
+        return Object.freeze({
+          image: value,
+          source: candidate.source,
+          mirrored: candidate.mirrored,
+          level: candidate.level,
+          forwardOffset: artConfig(art).forwardOffset
+        });
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Load candidates in strict order. Individual failures are expected and
+   * move resolution to the next level; the generic marker is the final
+   * guaranteed tactical image attempt.
+   */
+  async loadArt(art, view) {
+    const configuration = artConfig(art);
+    for (const candidate of getTacticalArtCandidates(configuration, view)) {
+      let value;
+      try {
+        value = await this.load(candidate.source);
+      } catch {
+        value = null;
+      }
+      if (value) {
+        return Object.freeze({
+          image: value,
+          source: candidate.source,
+          mirrored: candidate.mirrored,
+          level: candidate.level,
+          forwardOffset: configuration.forwardOffset
+        });
+      }
+    }
     return null;
   }
 

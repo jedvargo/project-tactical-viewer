@@ -262,13 +262,13 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] Generic fallback always succeeds.
 
 ### P24 — Custom artwork
-- [ ] Single custom tactical icon.
-- [ ] Nine optional per-view overrides.
-- [ ] Forward-reference metadata.
-- [ ] Opt-in North/South mirroring.
-- [ ] Opt-in East/West mirroring.
-- [ ] No default isometric mirroring.
-- [ ] Strict fallback-order tests.
+- [x] Single custom tactical icon.
+- [x] Nine optional per-view overrides.
+- [x] Forward-reference metadata.
+- [x] Opt-in North/South mirroring.
+- [x] Opt-in East/West mirroring.
+- [x] No default isometric mirroring.
+- [x] Strict fallback-order tests.
 
 ### P25 — Scene/token configuration UI
 - [ ] Scene enable control.

@@ -7,7 +7,11 @@ import {
   getTokenPitch,
   getTokenSchemaVersion
 } from "../../scripts/model/token-flags.js";
-import { CURRENT_SCHEMA_VERSION, MODULE_ID } from "../../scripts/constants.js";
+import {
+  CURRENT_SCHEMA_VERSION,
+  MODULE_ID,
+  VIEW_DEFINITIONS
+} from "../../scripts/constants.js";
 
 function tokenWithFlags(flags) {
   return {
@@ -47,6 +51,7 @@ describe("tactical token flag access", () => {
         mirror: { northSouth: false, eastWest: false }
       }
     });
+    expect(Object.keys(flags.art.views)).toEqual(VIEW_DEFINITIONS.map(({ id }) => id));
   });
 
   it("reads the complete namespaced art configuration without sharing mutable input", () => {

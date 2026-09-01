@@ -1,7 +1,10 @@
 import { orientationVector } from "../model/orientation-math.js";
 import { CoordinateAdapter } from "../model/coordinate-adapter.js";
 import { ProjectionEngine } from "../projection/projection-engine.js";
-import { AssetManager } from "./asset-manager.js";
+import {
+  AssetManager,
+  getTacticalArtCandidates
+} from "./asset-manager.js";
 
 const DEFAULT_BACKGROUND = "#111820";
 const DEFAULT_GRID = "rgba(151, 183, 204, 0.34)";
@@ -267,6 +270,15 @@ function visibleToken(state, projectionEngine, camera, viewport, definition) {
     orientationVector(state.heading, state.pitch),
     { ...camera, scale: camera.scale * 0.5 }
   );
+  const artDirection = projectionEngine.projectOrientationVector(
+    orientationVector(state.heading, 0),
+    { ...camera, scale: 1 }
+  );
+  const artDirectionLength = Math.hypot(artDirection.x, artDirection.y);
+  const forwardOffset = finiteOr(state.art?.forwardOffset, 0) * Math.PI / 180;
+  const artRotation = artDirectionLength > 1e-9
+    ? Math.atan2(artDirection.y, artDirection.x) + Math.PI / 2 - forwardOffset
+    : -forwardOffset;
   return Object.freeze({
     tokenId: state.tokenId,
     visibleToCurrentUser: true,
@@ -286,6 +298,7 @@ function visibleToken(state, projectionEngine, camera, viewport, definition) {
     preview: state.preview === true,
     offGrid: state.offGrid === true,
     art: state.art,
+    artRotation,
     worldPoint: Object.freeze(worldPoint),
     depthKey: definition.basis ? projectionEngine.depthKey(worldPoint, camera) : null,
     hiddenAxis: definition.hiddenAxis,
@@ -587,6 +600,43 @@ function drawArrowHead(context, point, vector) {
   context.lineTo(right.x, right.y);
 }
 
+function drawTacticalImage(context, image, point, markerRadius, rotation, mirrored) {
+  if (typeof context.drawImage !== "function") return false;
+  const canTransform = typeof context.save === "function"
+    && typeof context.restore === "function"
+    && typeof context.translate === "function"
+    && typeof context.rotate === "function"
+    && (!mirrored || typeof context.scale === "function");
+  try {
+    if (!canTransform) {
+      context.drawImage(
+        image,
+        point.x - markerRadius,
+        point.y - markerRadius,
+        markerRadius * 2,
+        markerRadius * 2
+      );
+      return true;
+    }
+    context.save();
+    context.translate(point.x, point.y);
+    context.rotate(finiteOr(rotation, 0));
+    if (mirrored) context.scale(-1, 1);
+    context.drawImage(
+      image,
+      -markerRadius,
+      -markerRadius,
+      markerRadius * 2,
+      markerRadius * 2
+    );
+    context.restore();
+    return true;
+  } catch {
+    try { context.restore?.(); } catch { /* best effort after a canvas error */ }
+    return false;
+  }
+}
+
 /** Concrete read-only schematic renderer for all fixed tactical views. */
 export class Canvas2DRendererV1 extends Canvas2DRenderer {
   constructor({
@@ -694,22 +744,21 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
 
     for (const token of model.tokens) {
       const { point, markerRadius, orientation } = token;
-      const preset = token.art?.preset ?? "generic-ship";
-      const imageSource = this.assetManager?.peekPreset?.(preset);
-      if (imageSource && typeof context.drawImage === "function") {
-        try {
-          context.drawImage(
-            imageSource,
-            point.x - markerRadius,
-            point.y - markerRadius,
-            markerRadius * 2,
-            markerRadius * 2
-          );
-        } catch {
-          this.drawGeneratedMarker(context, point, markerRadius);
-        }
-      } else {
-        this.requestAsset(preset, input);
+      const art = this.assetManager?.peekArt?.(token.art, model.view);
+      const configuredForwardOffset = finiteOr(token.art?.forwardOffset, 0);
+      const resolvedForwardOffset = finiteOr(art?.forwardOffset, configuredForwardOffset);
+      const imageDrawn = art?.image
+        ? drawTacticalImage(
+          context,
+          art.image,
+          point,
+          markerRadius,
+          token.artRotation + (configuredForwardOffset - resolvedForwardOffset) * Math.PI / 180,
+          art.mirrored === true
+        )
+        : false;
+      if (!imageDrawn) {
+        this.requestArt(token.art, model.view, input);
         this.drawGeneratedMarker(context, point, markerRadius);
       }
 
@@ -783,20 +832,29 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     context.stroke?.();
   }
 
-  requestAsset(preset, input) {
-    if (typeof this.assetManager?.loadPreset !== "function") return;
-    const key = typeof preset === "string" && preset ? preset : "generic-ship";
-    const before = this.assetManager.peekPreset?.(key) ?? null;
-    const promise = this.assetManager.loadPreset(key);
+  requestArt(art, view, input) {
+    if (typeof this.assetManager?.loadArt !== "function") return;
+    const candidates = getTacticalArtCandidates(art, view);
+    const key = `${view}|${candidates.map(({ source, mirrored }) =>
+      `${mirrored ? "m" : "n"}:${source}`).join("|")}`;
+    const before = this.assetManager.peekArt?.(art, view) ?? null;
+    const promise = this.assetManager.loadArt(art, view);
     if (typeof input.invalidate !== "function" || this.pendingAssetInvalidations.has(key)) return;
     this.pendingAssetInvalidations.add(key);
     Promise.resolve(promise).then(() => {
       this.pendingAssetInvalidations.delete(key);
-      const after = this.assetManager.peekPreset?.(key) ?? null;
-      if (!before && after) input.invalidate({ type: "asset-loaded", preset: key });
+      const after = this.assetManager.peekArt?.(art, view) ?? null;
+      if (!before?.image && after?.image) {
+        input.invalidate({ type: "asset-loaded", view, source: after.source });
+      }
     }, () => {
       this.pendingAssetInvalidations.delete(key);
     });
+  }
+
+  /** Compatibility helper for callers that requested a generic preset directly. */
+  requestAsset(preset, input) {
+    return this.requestArt({ preset }, input?.view ?? "top", input);
   }
 }
 
