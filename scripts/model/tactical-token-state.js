@@ -16,7 +16,7 @@ function documentData(tokenDocument) {
 }
 
 function idOf(value) {
-  return value?.id ?? value?._id;
+  return value?.id;
 }
 
 function positiveDimension(value, fallback = 1) {

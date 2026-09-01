@@ -145,30 +145,26 @@ describe("Prompt 28 rendering performance", () => {
     expect(second.grid).toBe(first.grid);
   });
 
-  it("records culling and render work only when debug metrics are enabled", () => {
+  it("keeps render-model culling semantic without a debug runtime pathway", () => {
     const currentScene = scene();
     const assetManager = {
       peekArt: vi.fn(() => null),
       loadArt: vi.fn(async () => null)
     };
-    const renderer = new Canvas2DRendererV1({ assetManager, debug: true });
-    renderer.render({
-      canvas: { width: 600, height: 400 },
-      context: context(),
+    const renderer = new Canvas2DRendererV1({ assetManager });
+    const renderModel = renderer.buildModel({
+      scene: currentScene,
+      panel: { view: "top", zoom: 40, focus: { x: 5, y: 5, z: 0 }, pan: { x: 0, y: 0 }, overlays: { grid: true } },
       viewport: { width: 600, height: 400 },
-      model: model(currentScene, [
+      visibleTacticalStates: [
         token("visible", 5.5, 5.5),
         token("offscreen", 100, 100)
-      ])
+      ]
     });
 
-    expect(renderer.getDebugMetrics()).toMatchObject({
-      frames: 1,
-      visibleTokens: 1,
-      culledTokens: 1,
-      artLookups: 1
-    });
-    expect(new Canvas2DRendererV1().getDebugMetrics()).toBeNull();
+    expect(renderModel.tokens).toHaveLength(1);
+    expect(renderModel.tokens[0].tokenId).toBe("visible");
+    expect(renderer.getDebugMetrics).toBeUndefined();
   });
 
   it("does not repaint after an idle frame has already been flushed", async () => {

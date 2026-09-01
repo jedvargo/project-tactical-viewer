@@ -278,7 +278,7 @@ function sceneGridKey(scene) {
   const dimensions = scene?.dimensions ?? scene ?? {};
   const grid = scene?.grid ?? {};
   return [
-    scene?.id ?? scene?._id ?? "",
+    scene?.id ?? "",
     dimensions.width,
     dimensions.height,
     grid.type,
@@ -519,8 +519,6 @@ function createOrthographicRenderModel({
     })
     : projectedGrid({ grid: tacticalGrid, camera, projectionEngine }));
   const projectedTokens = [];
-  let eligibleTokenCount = 0;
-  let culledTokenCount = 0;
   for (const state of (Array.isArray(tacticalStates) ? tacticalStates : [])) {
     const effectiveState = movementPreview?.tokenId === state?.tokenId
       ? { ...state, ...movementPreview, preview: true }
@@ -528,7 +526,6 @@ function createOrthographicRenderModel({
     if (effectiveState?.visibleToCurrentUser !== true || effectiveState?.participating !== true) {
       continue;
     }
-    eligibleTokenCount += 1;
     const projected = visibleToken(
       effectiveState,
       projectionEngine,
@@ -538,7 +535,6 @@ function createOrthographicRenderModel({
       selectedTokenId
     );
     if (!projected) {
-      culledTokenCount += 1;
       continue;
     }
     projectedTokens.push(projected);
@@ -562,11 +558,6 @@ function createOrthographicRenderModel({
     movementPreview,
     selectedTokenId,
     axisLabels: projectionEngine.describe(view).labels,
-    renderStats: Object.freeze({
-      eligibleTokenCount,
-      visibleTokenCount: projectedTokens.length,
-      culledTokenCount
-    }),
     overlays: Object.freeze({
       grid: overlays.grid !== false,
       names: overlays.names !== false,
@@ -713,8 +704,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     projectionEngine = new ProjectionEngine(),
     assetManager = new AssetManager(),
     colors = {},
-    maxStaticLayers = 8,
-    debug = false
+    maxStaticLayers = 8
   } = {}) {
     super();
     this.coordinateAdapter = coordinateAdapter;
@@ -727,28 +717,10 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     this.staticGridCache = new Map();
     this.gridGeometryCache = new Map();
     this.pendingAssetInvalidations = new Set();
-    this.debug = debug === true;
-    this.debugMetrics = this.debug
-      ? {
-        frames: 0,
-        visibleTokens: 0,
-        culledTokens: 0,
-        artLookups: 0,
-        staticGridHits: 0,
-        staticGridMisses: 0,
-        staticSurfaceHits: 0,
-        staticSurfaceMisses: 0,
-        lastDurationMs: 0
-      }
-      : null;
   }
 
   get staticLayerCacheSize() {
     return this.staticGridCache.size;
-  }
-
-  getDebugMetrics() {
-    return this.debugMetrics ? Object.freeze({ ...this.debugMetrics }) : null;
   }
 
   clearStaticCache() {
@@ -758,10 +730,10 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
   }
 
   invalidate(invalidation = {}) {
-    if (["resize", "scene-update", "view-change"].includes(invalidation?.type)) {
+    if (["resize", "scene-update", "view-change", "reconnect"].includes(invalidation?.type)) {
       this.clearStaticCache();
     }
-    if (invalidation?.type === "scene-update") this.gridGeometryCache.clear();
+    if (["scene-update", "reconnect"].includes(invalidation?.type)) this.gridGeometryCache.clear();
     return true;
   }
 
@@ -812,11 +784,9 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     });
     const existing = this.staticGridCache.get(key);
     if (existing) {
-      if (this.debugMetrics) this.debugMetrics.staticGridHits += 1;
       this.#touchStatic(key, existing);
       return existing.grid;
     }
-    if (this.debugMetrics) this.debugMetrics.staticGridMisses += 1;
 
     const projected = definition.basis
       ? projectedIsometricGrid({ grid, camera, projectionEngine, zRange })
@@ -846,7 +816,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     };
     const viewport = input.viewport;
     const dpr = positiveOr(input.devicePixelRatio, 1);
-    const sceneId = input.scene?.id ?? input.scene?._id;
+    const sceneId = input.scene?.id;
     const staticGridProvider = ({ grid, camera, projectionEngine, zRange, definition }) =>
       this.getCachedGrid({
         sceneId,
@@ -904,11 +874,9 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     const key = staticKey(model, width, height, dpr);
     const cached = this.staticGridCache.get(key);
     if (cached?.surface) {
-      if (this.debugMetrics) this.debugMetrics.staticSurfaceHits += 1;
       this.#touchStatic(key, cached);
       return cached.surface;
     }
-    if (this.debugMetrics) this.debugMetrics.staticSurfaceMisses += 1;
 
     const document = canvas?.ownerDocument ?? globalThis?.document;
     const surface = typeof globalThis?.OffscreenCanvas === "function"
@@ -933,9 +901,6 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
   render(input = {}) {
     const context = input.context;
     if (!context) return false;
-    const startedAt = this.debug
-      ? (globalThis?.performance?.now?.() ?? Date.now())
-      : 0;
     const model = input.model ?? this.buildModel(input);
     const { width, height } = dimensionsOf(input.viewport);
     const dpr = positiveOr(input.devicePixelRatio,
@@ -952,7 +917,6 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
 
     for (const token of model.tokens) {
       const { point, markerRadius, orientation } = token;
-      if (this.debugMetrics) this.debugMetrics.artLookups += 1;
       const art = this.assetManager?.peekArt?.(token.art, model.view);
       const configuredForwardOffset = finiteOr(token.art?.forwardOffset, 0);
       const resolvedForwardOffset = finiteOr(art?.forwardOffset, configuredForwardOffset);
@@ -1029,13 +993,6 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     }
 
     context.restore?.();
-    if (this.debugMetrics) {
-      this.debugMetrics.frames += 1;
-      this.debugMetrics.visibleTokens += model.renderStats?.visibleTokenCount
-        ?? model.tokens.length;
-      this.debugMetrics.culledTokens += model.renderStats?.culledTokenCount ?? 0;
-      this.debugMetrics.lastDurationMs = (globalThis?.performance?.now?.() ?? Date.now()) - startedAt;
-    }
     return true;
   }
 

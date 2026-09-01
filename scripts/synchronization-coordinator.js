@@ -7,7 +7,7 @@ const TOKEN_EVENTS = Object.freeze([
   "deleteToken"
 ]);
 
-const LIFECYCLE_EVENTS = Object.freeze(["canvasReady", "canvasTearDown", "updateScene"]);
+const LIFECYCLE_EVENTS = Object.freeze(["ready", "canvasReady", "canvasTearDown", "updateScene"]);
 
 const MOVEMENT_FIELDS = Object.freeze(["x", "y", "elevation"]);
 const ROTATION_FIELDS = Object.freeze(["rotation"]);
@@ -43,7 +43,7 @@ function defaultCancelScheduler(handle) {
 }
 
 function documentId(document) {
-  return document?.id ?? document?._id;
+  return document?.id;
 }
 
 function isObject(value) {
@@ -123,7 +123,8 @@ export class SynchronizationCoordinator {
       deleteToken: (document) => this.handleDeletion(document),
       canvasReady: (canvas) => this.handleCanvasReady(canvas),
       canvasTearDown: (canvas) => this.handleCanvasTearDown(canvas),
-      updateScene: (scene, changed) => this.handleSceneUpdate(scene, changed)
+      updateScene: (scene, changed) => this.handleSceneUpdate(scene, changed),
+      ready: () => this.handleReady()
     });
   }
 
@@ -222,6 +223,11 @@ export class SynchronizationCoordinator {
   handleCanvasReady(canvas) {
     this.activate();
     this.emitLifecycle({ type: "canvas-ready", canvas, scene: canvas?.scene ?? canvas });
+  }
+
+  handleReady() {
+    this.activate();
+    this.emitLifecycle({ type: "ready" });
   }
 
   handleCanvasTearDown(canvas) {

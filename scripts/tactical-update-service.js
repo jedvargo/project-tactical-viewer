@@ -28,6 +28,20 @@ function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+function canonicalValue(document, field) {
+  if (field === "pitch") return getTokenPitch(document);
+  return document?.[field];
+}
+
+function canonicalFields(document, update) {
+  const fields = {};
+  for (const [key, value] of Object.entries(update)) {
+    const field = key === `flags.${MODULE_ID}.pitch` ? "pitch" : key;
+    fields[field] = canonicalValue(document, field);
+  }
+  return fields;
+}
+
 function result(status, properties = {}) {
   return Object.freeze({
     status,
@@ -166,9 +180,20 @@ export class TacticalUpdateService {
 
     try {
       const updatedDocument = await document.update(update);
+      if (!updatedDocument) return rejected("update-rejected");
+      const canonical = canonicalFields(updatedDocument, update);
+      const adjustedFields = Object.freeze(Object.entries(update)
+        .map(([key]) => key === `flags.${MODULE_ID}.pitch` ? "pitch" : key)
+        .filter((field, index, fields) => fields.indexOf(field) === index)
+        .filter((field) => canonical[field] !== update[field === "pitch"
+          ? `flags.${MODULE_ID}.pitch`
+          : field]));
       return result("accepted", {
         update: Object.freeze({ ...update }),
-        document: updatedDocument
+        document: updatedDocument,
+        canonical: Object.freeze({ ...canonical }),
+        adjusted: adjustedFields.length > 0,
+        adjustedFields
       });
     } catch (error) {
       return rejected("update-failed", { error });

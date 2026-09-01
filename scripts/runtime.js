@@ -123,7 +123,7 @@ export function createRuntime({
   services.set("assets", resolvedAssetManager);
   services.set("configurationUI", resolvedConfigurationUI);
 
-  const sceneIdOf = (scene) => scene?.id ?? scene?._id;
+  const sceneIdOf = (scene) => scene?.id;
   const sceneFromCanvas = (canvasOrScene) => canvasOrScene?.scene ?? canvasOrScene;
   const autoOpenEnabled = () => {
     try {
@@ -184,6 +184,10 @@ export function createRuntime({
     if (activeViewer && sceneIdOf(activeViewer.scene) !== session.sceneId) {
       await closeActiveViewer({ reason: "scene-change" });
     }
+    if (activeViewer && sceneIdOf(activeViewer.scene) === session.sceneId) {
+      activeViewer.reconnect?.({ render: true });
+      return activeViewer;
+    }
     if (!getSceneEnabled(scene) || !sceneEligibility.isEligible(scene).eligible) {
       if (activeViewer) await closeActiveViewer({ reason: "scene-ineligible" });
       return null;
@@ -214,10 +218,13 @@ export function createRuntime({
     return activeViewer.refreshFromDocuments?.({ render: true }) ?? activeViewer;
   };
 
+  const handleReady = () => activeViewer?.reconnect?.({ render: true }) ?? null;
+
   const handleLifecycle = (event) => {
     if (event?.type === "canvas-ready") return void handleCanvasReady(event.canvas ?? event.scene);
     if (event?.type === "canvas-teardown") return void handleCanvasTearDown(event.canvas ?? event.scene);
     if (event?.type === "scene-update") return void handleSceneUpdate(event.scene);
+    if (event?.type === "ready") return void handleReady();
     return undefined;
   };
 

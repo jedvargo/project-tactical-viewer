@@ -147,6 +147,24 @@ describe("user layout migrations", () => {
     expect(service.getAllSceneLayouts()).toHaveProperty("healthy");
   });
 
+  it("writes a healed layout back without dropping healthy Scene entries", async () => {
+    const settings = makeSettings({
+      schemaVersion: 1,
+      scenes: {
+        healthy: { panels: [{ view: "east" }] },
+        corrupt: { panels: "broken" }
+      }
+    });
+    const service = new PersistenceService({ settings });
+
+    service.initialize();
+    await service.migrationPromise;
+
+    expect(settings.writes).toHaveLength(1);
+    expect(settings.writes[0].scenes).toHaveProperty("healthy");
+    expect(settings.writes[0].scenes).not.toHaveProperty("corrupt");
+  });
+
   it("prunes the least recently used layouts at the documented bound", () => {
     const scenes = Object.fromEntries(Array.from(
       { length: MAX_SCENE_LAYOUTS + 2 },

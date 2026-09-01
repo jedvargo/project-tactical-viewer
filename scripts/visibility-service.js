@@ -11,7 +11,7 @@ function defaultPlaceableProvider(tokenDocument) {
   if (tokenDocument.document) return tokenDocument;
   if (tokenDocument.object) return tokenDocument.object;
 
-  const tokenId = tokenDocument.id ?? tokenDocument._id;
+  const tokenId = tokenDocument.id;
   return tokenId === undefined
     ? undefined
     : globalThis.canvas?.tokens?.get?.(tokenId);

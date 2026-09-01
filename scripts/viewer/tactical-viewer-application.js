@@ -115,13 +115,14 @@ function makeState(scene, persistenceService, registry) {
 function sceneTokenById(scene, tokenId) {
   const tokens = scene?.tokens;
   if (typeof tokens?.get === "function") return tokens.get(tokenId);
-  if (Array.isArray(tokens)) return tokens.find((token) => (token?.id ?? token?._id) === tokenId);
+  if (Array.isArray(tokens)) return tokens.find((token) => token?.id === tokenId);
   if (tokens && typeof tokens === "object") return tokens[tokenId];
   return null;
 }
 
 function actionMessage(result) {
   if (result?.status === "conflict") return "Token changed remotely; movement canceled.";
+  if (result?.adjusted === true) return "Foundry adjusted the token to an accepted position.";
   if (result?.reason === "isometric-movement-disabled") {
     return "Isometric views are read-only; move tokens from an orthographic view.";
   }
@@ -309,7 +310,10 @@ export function createTacticalViewerApplicationClass({
     }
 
     reconnect(options = {}) {
-      return this.refreshFromDocuments(options);
+      this.renderer?.invalidate?.({ type: "reconnect" });
+      const states = this.refreshFromDocuments({ render: false });
+      if (options.render !== false) this.requestRender({ type: "reconnect" });
+      return states;
     }
 
     reconcileSelection(visibleTacticalStates) {
@@ -802,6 +806,7 @@ export function createTacticalViewerApplicationClass({
     handleActionResult(result) {
       this.state.movementPreview = null;
       if (this.actionMessageElement) this.actionMessageElement.textContent = actionMessage(result);
+      this.refreshFromDocuments({ render: false });
       this.requestRender({ type: "tactical-action-result", status: result?.status });
     }
 

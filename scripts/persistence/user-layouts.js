@@ -18,6 +18,14 @@ function settingRead(settings) {
   }
 }
 
+function sameSerializableValue(left, right) {
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * User-scoped persistence boundary. Foundry's settings object is already
  * resolved for the current user; no user identity is stored in the layout.
@@ -26,6 +34,7 @@ export class PersistenceService {
   #settings;
   #clock;
   #preferences;
+  #migrationPromise = Promise.resolve();
   #initialized = false;
 
   constructor({ settings, now = () => Date.now() } = {}) {
@@ -35,10 +44,29 @@ export class PersistenceService {
 
   initialize() {
     if (!this.#initialized) {
-      this.#preferences = migrateUserLayout(settingRead(this.#settings));
+      const rawPreferences = settingRead(this.#settings);
+      this.#preferences = migrateUserLayout(rawPreferences);
       this.#initialized = true;
+      if (rawPreferences !== undefined
+        && !sameSerializableValue(rawPreferences, this.#preferences)
+        && typeof this.#settings?.set === "function") {
+        try {
+          this.#migrationPromise = Promise.resolve(this.#settings.set(
+            MODULE_ID,
+            USER_LAYOUT_SETTING_KEY,
+            this.#preferences
+          )).catch(() => undefined);
+        } catch {
+          this.#migrationPromise = Promise.resolve();
+        }
+      }
     }
     return this.getPreferences();
+  }
+
+  /** Resolve the one-time best-effort write-back of a healed layout setting. */
+  get migrationPromise() {
+    return this.#migrationPromise;
   }
 
   get initialized() {
@@ -71,6 +99,7 @@ export class PersistenceService {
       throw new TypeError("A Scene ID is required to save a layout");
     }
     if (!this.#initialized) this.initialize();
+    await this.#migrationPromise;
 
     const nextScene = migrateUserLayout({
       ...this.#preferences,

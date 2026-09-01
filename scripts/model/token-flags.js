@@ -1,4 +1,5 @@
 import {
+  ALLOWED_PITCHES,
   CURRENT_SCHEMA_VERSION,
   MODULE_ID,
   VIEW_DEFINITIONS
@@ -23,12 +24,23 @@ const DEFAULT_ART = Object.freeze({
   ))
 });
 
+export const DEFAULT_TACTICAL_TOKEN_FLAGS = Object.freeze({
+  schemaVersion: CURRENT_SCHEMA_VERSION,
+  enabled: false,
+  pitch: 0,
+  art: DEFAULT_ART
+});
+
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function finiteNumber(value) {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function normalizedPitch(value) {
+  return ALLOWED_PITCHES.includes(value) ? value : 0;
 }
 
 function freezeObject(value) {
@@ -42,11 +54,49 @@ function rawToken(documentOrPrototype, key) {
   if (!document || typeof document !== "object") return undefined;
 
   if (typeof document.getFlag === "function") {
-    const value = document.getFlag(TOKEN_FLAG_SCOPE, key);
-    if (value !== undefined) return value;
+    try {
+      const value = document.getFlag(TOKEN_FLAG_SCOPE, key);
+      if (value !== undefined) return value;
+    } catch {
+      return undefined;
+    }
   }
 
   return document.flags?.[TOKEN_FLAG_SCOPE]?.[key];
+}
+
+function rawNamespace(documentOrPrototype) {
+  const document = documentOrPrototype?.document ?? documentOrPrototype;
+  if (!document || typeof document !== "object") return {};
+  if (isRecord(document.flags?.[TOKEN_FLAG_SCOPE])) return document.flags[TOKEN_FLAG_SCOPE];
+  if (typeof document.getFlag !== "function") return {};
+  return Object.fromEntries([
+    TOKEN_SCHEMA_VERSION_FLAG,
+    TOKEN_PARTICIPATION_FLAG,
+    TOKEN_PITCH_FLAG,
+    TOKEN_ART_FLAG
+  ].map((key) => [key, rawToken(document, key)])
+    .filter(([, value]) => value !== undefined));
+}
+
+/** Normalize all historical tactical-token flag shapes to the current schema. */
+export function migrateTokenFlags(value) {
+  const source = isRecord(value) ? value : {};
+  const legacyArt = isRecord(source.art)
+    ? source.art
+    : {
+      icon: typeof source.icon === "string" ? source.icon : "",
+      preset: source.preset,
+      views: source.views,
+      mirror: source.mirror,
+      forwardOffset: source.forwardOffset
+    };
+  return freezeObject({
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    enabled: source.enabled === true,
+    pitch: normalizedPitch(source.pitch),
+    art: normalizeTokenArt(legacyArt)
+  });
 }
 
 export function normalizeTokenArt(value) {
@@ -84,7 +134,7 @@ export function getTokenParticipation(documentOrPrototype) {
 /** Read the stored pitch. TacticalTokenState normalizes valid numeric values for display. */
 export function getTokenPitch(documentOrPrototype) {
   const value = getTokenFlag(documentOrPrototype, TOKEN_PITCH_FLAG, 0);
-  return finiteNumber(value) ? value : 0;
+  return normalizedPitch(value);
 }
 
 /** Read the normalized, defensive tactical-art configuration. */
@@ -97,15 +147,14 @@ export function buildTokenFlagUpdate({ enabled = false, pitch = 0, art = {} } = 
   return {
     [`flags.${TOKEN_FLAG_SCOPE}.${TOKEN_SCHEMA_VERSION_FLAG}`]: CURRENT_SCHEMA_VERSION,
     [`flags.${TOKEN_FLAG_SCOPE}.${TOKEN_PARTICIPATION_FLAG}`]: enabled === true,
-    [`flags.${TOKEN_FLAG_SCOPE}.${TOKEN_PITCH_FLAG}`]: finiteNumber(pitch) ? pitch : 0,
+    [`flags.${TOKEN_FLAG_SCOPE}.${TOKEN_PITCH_FLAG}`]: normalizedPitch(pitch),
     [`flags.${TOKEN_FLAG_SCOPE}.${TOKEN_ART_FLAG}`]: normalizeTokenArt(art)
   };
 }
 
 /** Read a valid stored schema version, falling back to the current version. */
 export function getTokenSchemaVersion(documentOrPrototype) {
-  const value = getTokenFlag(documentOrPrototype, TOKEN_SCHEMA_VERSION_FLAG);
-  return Number.isInteger(value) && value > 0 ? value : CURRENT_SCHEMA_VERSION;
+  return migrateTokenFlags(rawNamespace(documentOrPrototype)).schemaVersion;
 }
 
 /**
@@ -114,12 +163,9 @@ export function getTokenSchemaVersion(documentOrPrototype) {
  * consult a prototype when reading an existing placed TokenDocument.
  */
 export function getTacticalTokenFlags(documentOrPrototype) {
-  return freezeObject({
-    schemaVersion: getTokenSchemaVersion(documentOrPrototype),
-    enabled: getTokenParticipation(documentOrPrototype),
-    pitch: getTokenPitch(documentOrPrototype),
-    art: getTokenArt(documentOrPrototype)
-  });
+  const namespace = rawNamespace(documentOrPrototype);
+  if (Object.keys(namespace).length > 0) return migrateTokenFlags(namespace);
+  return DEFAULT_TACTICAL_TOKEN_FLAGS;
 }
 
 /** Explicitly named alias for callers handling Foundry prototype-token data. */

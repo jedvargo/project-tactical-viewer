@@ -73,7 +73,7 @@ describe("tactical token flag access", () => {
     const flags = getTacticalTokenFlags(token);
 
     expect(flags).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
       enabled: true,
       pitch: 45,
       art: {

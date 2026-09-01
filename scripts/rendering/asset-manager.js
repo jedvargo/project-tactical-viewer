@@ -133,6 +133,7 @@ export class AssetManager {
     this.imageFactory = imageFactory;
     this.resolvePath = resolvePath;
     this.cache = new Map();
+    this.failedSources = new Map();
   }
 
   get cacheSize() {
@@ -144,12 +145,14 @@ export class AssetManager {
   }
 
   getStatus(source) {
-    const key = this.#keyFor(source);
+    const key = this.#resolvedKey(source);
+    if (!key) return typeof source === "string" && source.trim() ? "failed" : "missing";
     return this.cache.get(key)?.state ?? "missing";
   }
 
   peek(source) {
-    const key = this.#keyFor(source);
+    const key = this.#resolvedKey(source);
+    if (!key) return null;
     const record = this.cache.get(key);
     if (!record) return null;
     this.#touch(key, record);
@@ -231,7 +234,10 @@ export class AssetManager {
 
   load(source) {
     if (typeof source !== "string" || !source.trim()) return Promise.resolve(null);
-    const key = this.#keyFor(source);
+    const rawSource = source.trim();
+    if (this.failedSources.has(rawSource)) return Promise.resolve(null);
+    const key = this.#resolvedKey(rawSource);
+    if (!key) return Promise.resolve(null);
     const existing = this.cache.get(key);
     if (existing) {
       this.#touch(key, existing);
@@ -296,8 +302,9 @@ export class AssetManager {
   }
 
   clear() {
-    const removed = this.cache.size;
+    const removed = this.cache.size + this.failedSources.size;
     this.cache.clear();
+    this.failedSources.clear();
     return removed;
   }
 
@@ -311,6 +318,25 @@ export class AssetManager {
       throw new TypeError("Asset paths must resolve to a non-empty string");
     }
     return resolved;
+  }
+
+  #resolvedKey(source) {
+    if (typeof source !== "string" || !source.trim()) return null;
+    const rawSource = source.trim();
+    if (this.failedSources.has(rawSource)) return null;
+    try {
+      return this.#keyFor(rawSource);
+    } catch {
+      // A resolver failure is a stable session failure. Remember it before
+      // fallback selection asks about the same candidate on the next redraw.
+      this.failedSources.set(rawSource, true);
+      while (this.failedSources.size > this.maxEntries) {
+        const oldest = this.failedSources.keys().next().value;
+        if (oldest === undefined) break;
+        this.failedSources.delete(oldest);
+      }
+      return null;
+    }
   }
 
   #touch(key, record) {

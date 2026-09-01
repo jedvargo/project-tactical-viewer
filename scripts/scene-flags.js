@@ -1,20 +1,67 @@
-import { MODULE_ID } from "./constants.js";
+import { CURRENT_SCHEMA_VERSION, MODULE_ID } from "./constants.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
 
 export const SCENE_FLAG_SCOPE = MODULE_ID;
 export const SCENE_ENABLED_FLAG = "enabled";
+export const SCENE_SCHEMA_VERSION_FLAG = "schemaVersion";
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function cloneValue(value) {
+  if (Array.isArray(value)) return value.map(cloneValue);
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, cloneValue(child)]));
+  }
+  return value;
+}
+
+/** Normalize every Scene flag shape written during development to v2. */
+export function migrateSceneFlags(value) {
+  const source = isRecord(value) ? value : {};
+  const legacyEnabled = typeof value === "boolean" ? value : false;
+  const migrated = {
+    ...Object.fromEntries(Object.entries(source)
+      .filter(([key]) => ![SCENE_SCHEMA_VERSION_FLAG, SCENE_ENABLED_FLAG].includes(key))
+      .map(([key, child]) => [key, cloneValue(child)])),
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    enabled: typeof source.enabled === "boolean" ? source.enabled : legacyEnabled
+  };
+  return Object.freeze(migrated);
+}
+
+function rawSceneFlags(scene) {
+  const namespace = scene?.flags?.[SCENE_FLAG_SCOPE];
+  if (typeof namespace === "boolean") return namespace;
+  if (isRecord(namespace)) return namespace;
+
+  if (typeof scene?.getFlag !== "function") return undefined;
+  try {
+    const enabled = scene.getFlag(SCENE_FLAG_SCOPE, SCENE_ENABLED_FLAG);
+    const schemaVersion = scene.getFlag(SCENE_FLAG_SCOPE, SCENE_SCHEMA_VERSION_FLAG);
+    return { enabled, schemaVersion };
+  } catch {
+    return undefined;
+  }
+}
 
 function rawEnabledValue(scene) {
-  if (typeof scene?.getFlag === "function") {
-    return scene.getFlag(SCENE_FLAG_SCOPE, SCENE_ENABLED_FLAG);
-  }
-  return scene?.flags?.[SCENE_FLAG_SCOPE]?.[SCENE_ENABLED_FLAG];
+  return rawSceneFlags(scene);
+}
+
+/** Read the normalized shared Scene flag namespace without changing Scene state. */
+export function getSceneFlags(scene) {
+  return migrateSceneFlags(rawEnabledValue(scene));
+}
+
+export function getSceneSchemaVersion(scene) {
+  return getSceneFlags(scene).schemaVersion;
 }
 
 /** Read the shared namespaced enable flag without changing Scene state. */
 export function getSceneEnabled(scene) {
-  const value = rawEnabledValue(scene);
-  return value === true || Boolean(value && typeof value === "object" && value.enabled === true);
+  return getSceneFlags(scene).enabled;
 }
 
 /**
@@ -36,5 +83,10 @@ export async function setSceneEnabled(
     : eligibilityService.evaluate(scene);
   if (nextValue && !eligibility.eligible) return false;
 
-  return scene.setFlag(SCENE_FLAG_SCOPE, SCENE_ENABLED_FLAG, nextValue);
+  // Write the marker first so the legacy boolean-only accessor remains
+  // readable while Foundry processes the two namespaced flag keys.
+  await scene.setFlag(SCENE_FLAG_SCOPE, SCENE_SCHEMA_VERSION_FLAG, CURRENT_SCHEMA_VERSION);
+  const result = await scene.setFlag(SCENE_FLAG_SCOPE, SCENE_ENABLED_FLAG, nextValue);
+  if (result === false) return result;
+  return result;
 }

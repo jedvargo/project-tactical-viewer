@@ -319,14 +319,16 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] optimize only measured hotspots.
 
 ### P29 — Reliability/interoperability
-- [ ] schema migration fixtures.
-- [ ] corrupt-data recovery.
-- [ ] missing art recovery.
-- [ ] Foundry rejection/clamping handling.
-- [ ] stale layout cleanup.
-- [ ] module coexistence checks.
-- [ ] no private API dependency without documented justification.
-- [ ] reconnect/multi-user regression suite.
+- [x] schema migration fixtures.
+- [x] corrupt-data recovery.
+- [x] missing art recovery.
+- [x] Foundry rejection/clamping handling.
+- [x] stale layout cleanup.
+- [x] module coexistence checks.
+- [x] no private API dependency without documented justification.
+- [x] reconnect/multi-user regression suite.
+- [!] Manual reload/reconnect/disable-enable/native-operation reliability smoke check.
+  - Blocked: no linked or installed Foundry VTT v14 executable or test World was available for the required client lifecycle and native-operation check; automated Foundry-shaped coverage passed.
 
 ### P30 — Release candidate
 - [ ] Complete localization keys.

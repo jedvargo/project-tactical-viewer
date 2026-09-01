@@ -33,6 +33,4 @@ The existing optional client DPR setting was not tightened based on this
 profile; real high-DPR Foundry measurements should determine whether a lower
 device limit is needed.
 
-Debug counters are opt-in through `Canvas2DRendererV1({ debug: true })` and are
-read through `getDebugMetrics()`. No console logging or continuous sampling is
-enabled in the production path.
+No console logging or continuous sampling is enabled in the production path.
