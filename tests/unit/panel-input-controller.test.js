@@ -163,4 +163,34 @@ describe("panel input controller", () => {
     expect(clampLogicalZoom(9999)).toBe(MAX_LOGICAL_ZOOM);
     expect(clampLogicalZoom(64)).toBe(64);
   });
+
+  it("offers only visible overlap candidates with hidden-axis coordinates", () => {
+    const selected = [];
+    const chooser = vi.fn();
+    const controller = new PanelInputController({
+      panel: { view: "top", zoom: 50, focus: { x: 5, y: 5, z: 0 } },
+      element: surface(),
+      getRenderModel: () => model({
+        tokens: [
+          { tokenId: "upper", name: "Upper", point: { x: 100, y: 100 }, markerRadius: 20,
+            visibleToCurrentUser: true, hiddenAxis: "z", hiddenAxisValue: 4, hiddenAxisLabel: "Z" },
+          { tokenId: "lower", name: "Lower", point: { x: 100, y: 100 }, markerRadius: 20,
+            visibleToCurrentUser: true, hiddenAxis: "z", hiddenAxisValue: 1, hiddenAxisLabel: "Z" },
+          { tokenId: "secret", name: "Secret", point: { x: 100, y: 100 }, markerRadius: 20,
+            visibleToCurrentUser: false, hiddenAxis: "z", hiddenAxisValue: 9, hiddenAxisLabel: "Z" }
+        ]
+      }),
+      onOverlapChooser: chooser,
+      onSelectionChanged: (tokenId) => selected.push(tokenId)
+    });
+
+    controller.selectAt({ x: 100, y: 100 });
+
+    expect(chooser).toHaveBeenCalledOnce();
+    const candidates = chooser.mock.calls[0][0];
+    expect(candidates.map(({ tokenId, hiddenAxisValue }) => [tokenId, hiddenAxisValue]))
+      .toEqual([["lower", 1], ["upper", 4]]);
+    expect(candidates.some(({ tokenId }) => tokenId === "secret")).toBe(false);
+    expect(selected).toEqual(["lower"]);
+  });
 });

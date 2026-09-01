@@ -246,12 +246,12 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: no linked or installed Foundry VTT v14 executable/test World was available for the requested Top/North/Isometric formation and orthographic heading/pitch comparison.
 
 ### P22 — Depth and overlapping tokens
-- [ ] Deterministic isometric depth sort.
-- [ ] Orthographic overlap detection.
-- [ ] Visible-only stack count.
-- [ ] Accessible stack chooser/cycler.
-- [ ] Hidden-axis context.
-- [ ] Selection remains visible.
+- [x] Deterministic isometric depth sort.
+- [x] Orthographic overlap detection.
+- [x] Visible-only stack count.
+- [x] Accessible stack chooser/cycler.
+- [x] Hidden-axis context.
+- [x] Selection remains visible.
 
 ### P23 — Generic tactical assets
 - [ ] AssetManager.

@@ -705,4 +705,38 @@ describe("TacticalViewerApplication", () => {
       expect.any(Object)
     );
   });
+
+  it("provides a keyboard-selectable overlap chooser with hidden-axis context", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    const handled = application.showOverlapChooser(0, [
+      { tokenId: "upper", name: "Upper", visibleToCurrentUser: true,
+        hiddenAxisLabel: "Z", hiddenAxisValue: 4 },
+      { tokenId: "hidden", name: "Hidden", visibleToCurrentUser: false,
+        hiddenAxisLabel: "Z", hiddenAxisValue: 9 },
+      { tokenId: "lower", name: "Lower", visibleToCurrentUser: true,
+        hiddenAxisLabel: "Z", hiddenAxisValue: 1 }
+    ]);
+
+    const chooser = application.element.querySelector('[data-role="overlap-chooser"]');
+    const select = application.element.querySelector('[data-role="overlap-chooser-select"]');
+    expect(handled).toBe(true);
+    expect(chooser.hidden).toBe(false);
+    expect(select.tagName).toBe("SELECT");
+    expect(select.attributes.get("aria-label")).toBe("Choose visible overlapping token");
+    expect(select.children.map((option) => option.textContent)).toEqual([
+      "Lower · Z=1", "Upper · Z=4"
+    ]);
+  });
 });

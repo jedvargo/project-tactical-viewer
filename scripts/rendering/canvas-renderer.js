@@ -246,13 +246,14 @@ function staticKey(model, width, height, dpr) {
   ].join(":");
 }
 
-function visibleToken(state, projectionEngine, camera, viewport) {
+function visibleToken(state, projectionEngine, camera, viewport, definition) {
   if (!state || state.visibleToCurrentUser !== true || state.participating !== true) return null;
-  const point = projectionEngine.projectPoint({
+  const worldPoint = {
     x: state.tacticalX,
     y: state.tacticalY,
     z: state.tacticalZ
-  }, camera);
+  };
+  const point = projectionEngine.projectPoint(worldPoint, camera);
   const markerRadius = Math.max(
     4,
     Math.min(positiveOr(state.width, 1), positiveOr(state.height, 1)) * camera.scale * 0.12
@@ -283,10 +284,117 @@ function visibleToken(state, projectionEngine, camera, viewport) {
     lockRotation: state.lockRotation === true,
     preview: state.preview === true,
     offGrid: state.offGrid === true,
+    worldPoint: Object.freeze(worldPoint),
+    depthKey: definition.basis ? projectionEngine.depthKey(worldPoint, camera) : null,
+    hiddenAxis: definition.hiddenAxis,
+    hiddenAxisLabel: definition.hiddenAxis ? definition.hiddenAxis.toUpperCase() : null,
+    hiddenAxisValue: definition.hiddenAxis ? worldPoint[definition.hiddenAxis] : null,
     point,
     orientation,
     markerRadius
   });
+}
+
+function compareTokenIds(left, right) {
+  const leftId = String(left?.tokenId ?? "");
+  const rightId = String(right?.tokenId ?? "");
+  return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+}
+
+function accessibleTokenLabel(token) {
+  const name = token.name || token.tokenId;
+  if (!token.hiddenAxisLabel) return name;
+  return `${name}, ${token.hiddenAxisLabel} ${token.hiddenAxisValue}`;
+}
+
+/**
+ * Find connected groups of visible projected markers whose circles touch.
+ * This operates on renderer-facing records only, so hidden documents cannot
+ * enter a stack through a later consumer.
+ */
+export function detectProjectedOverlaps(projectedTokens = []) {
+  if (!Array.isArray(projectedTokens)) return Object.freeze([]);
+  const tokens = projectedTokens.filter((token) =>
+    token?.visibleToCurrentUser === true
+    && token?.culled !== true
+    && Number.isFinite(token?.point?.x)
+    && Number.isFinite(token?.point?.y)
+    && Number.isFinite(token?.markerRadius)
+  );
+  const parent = tokens.map((_, index) => index);
+  const find = (index) => {
+    let root = index;
+    while (parent[root] !== root) root = parent[root];
+    while (parent[index] !== index) {
+      const next = parent[index];
+      parent[index] = root;
+      index = next;
+    }
+    return root;
+  };
+  const union = (left, right) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
+  };
+
+  for (let left = 0; left < tokens.length; left += 1) {
+    for (let right = left + 1; right < tokens.length; right += 1) {
+      const distance = Math.hypot(
+        tokens[left].point.x - tokens[right].point.x,
+        tokens[left].point.y - tokens[right].point.y
+      );
+      if (distance <= tokens[left].markerRadius + tokens[right].markerRadius) {
+        union(left, right);
+      }
+    }
+  }
+
+  const groups = new Map();
+  tokens.forEach((token, index) => {
+    const root = find(index);
+    const group = groups.get(root) ?? [];
+    group.push(token);
+    groups.set(root, group);
+  });
+  return Object.freeze([...groups.values()]
+    .filter((group) => group.length > 1)
+    .map((group) => Object.freeze(group.slice().sort(compareTokenIds))));
+}
+
+function addOverlapMetadata(tokens, definition) {
+  const groups = detectProjectedOverlaps(tokens);
+  const byToken = new Map();
+  const stacks = groups.map((group) => {
+    const first = group[0];
+    const stackId = `stack:${group.map(({ tokenId }) => String(tokenId)).join("|")}`;
+    const candidates = Object.freeze(group.map((token) => Object.freeze({
+      tokenId: token.tokenId,
+      name: token.name,
+      visibleToCurrentUser: true,
+      hiddenAxis: definition.hiddenAxis,
+      hiddenAxisLabel: token.hiddenAxisLabel,
+      hiddenAxisValue: token.hiddenAxisValue,
+      accessibleLabel: accessibleTokenLabel(token)
+    })));
+    group.forEach((token) => byToken.set(token.tokenId, {
+      stackId,
+      stackCount: group.length
+    }));
+    return Object.freeze({
+      stackId,
+      count: group.length,
+      point: first.point,
+      markerRadius: Math.max(...group.map(({ markerRadius }) => markerRadius)),
+      hiddenAxis: definition.hiddenAxis,
+      candidates
+    });
+  });
+  const enrichedTokens = tokens.map((token) => Object.freeze({
+    ...token,
+    ...(byToken.get(token.tokenId) ?? { stackId: null, stackCount: 1 })
+  }));
+  return { tokens: enrichedTokens, stacks: Object.freeze(stacks) };
 }
 
 /**
@@ -345,17 +453,24 @@ function createOrthographicRenderModel({
       definition
     })
     : projectedGrid({ grid: gridGeometry, camera, projectionEngine });
-  const tokens = Object.freeze(
-    (Array.isArray(tacticalStates) ? tacticalStates : [])
+  const projectedTokens = (Array.isArray(tacticalStates) ? tacticalStates : [])
       .map((state) => movementPreview?.tokenId === state?.tokenId
         ? { ...state, ...movementPreview, preview: true }
         : state)
-      .map((state) => visibleToken(state, projectionEngine, camera, viewport))
+      .map((state) => visibleToken(state, projectionEngine, camera, viewport, definition))
       .filter(Boolean)
       .map((state) => Object.freeze({
         ...state,
         selected: selectedTokenId !== null && state.tokenId === selectedTokenId
-      }))
+      }));
+  const withOverlapMetadata = addOverlapMetadata(projectedTokens, definition);
+  const tokens = Object.freeze(
+    (definition.basis
+      ? projectionEngine.sortByDepth(withOverlapMetadata.tokens, camera, {
+        getPoint: (token) => token.worldPoint
+      })
+      : withOverlapMetadata.tokens)
+      .map((token) => Object.freeze(token))
   );
   return Object.freeze({
     sceneId: scene?.id,
@@ -363,6 +478,8 @@ function createOrthographicRenderModel({
     camera: Object.freeze(camera),
     grid,
     tokens,
+    stacks: withOverlapMetadata.stacks,
+    overlaps: withOverlapMetadata.stacks,
     movementPreview,
     selectedTokenId,
     axisLabels: projectionEngine.describe(view).labels,
@@ -588,15 +705,6 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
         context.setLineDash?.([]);
       }
 
-      if (token.selected) {
-        context.beginPath?.();
-        context.strokeStyle = this.colors.selection ?? "#ffffff";
-        context.setLineDash?.([5, 3]);
-        context.arc?.(point.x, point.y, markerRadius + 4, 0, Math.PI * 2);
-        context.stroke?.();
-        context.setLineDash?.([]);
-      }
-
       if (model.overlays.heading || model.overlays.pitch) {
         const tip = { x: point.x + orientation.x, y: point.y + orientation.y };
         context.beginPath?.();
@@ -622,6 +730,27 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
         context.fillText?.(`P ${formatSigned(token.pitch)}°`, labelX, labelY + 42);
       }
       if (token.offGrid) context.fillText?.("OFF GRID", labelX, labelY + 56);
+    }
+
+    for (const stack of model.stacks ?? []) {
+      context.fillStyle = this.colors.text ?? DEFAULT_TEXT;
+      context.font = "bold 12px sans-serif";
+      context.fillText?.(`x${stack.count}`,
+        stack.point.x + stack.markerRadius,
+        stack.point.y - stack.markerRadius);
+    }
+
+    // Selection is deliberately a final overlay. Bodies remain in canonical
+    // far-to-near order while a selected token remains understandable when a
+    // nearer marker partly occludes it.
+    for (const token of model.tokens) {
+      if (!token.selected) continue;
+      context.beginPath?.();
+      context.strokeStyle = this.colors.selection ?? "#ffffff";
+      context.setLineDash?.([5, 3]);
+      context.arc?.(token.point.x, token.point.y, token.markerRadius + 4, 0, Math.PI * 2);
+      context.stroke?.();
+      context.setLineDash?.([]);
     }
 
     context.restore?.();

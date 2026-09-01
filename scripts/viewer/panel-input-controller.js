@@ -50,11 +50,16 @@ export function clampLogicalZoom(value) {
  * accident through a second consumer.
  */
 export function hitTestProjectedTokens(screenPoint, projectedTokens = []) {
+  return getProjectedTokenCandidates(screenPoint, projectedTokens).at(0) ?? null;
+}
+
+/** Return all visible markers under a pointer, in deterministic chooser order. */
+export function getProjectedTokenCandidates(screenPoint, projectedTokens = []) {
   const target = point(screenPoint);
-  if (!Array.isArray(projectedTokens)) return null;
+  if (!Array.isArray(projectedTokens)) return [];
 
   return projectedTokens
-    .filter((token) => token?.visibleToCurrentUser !== false && token?.culled !== true)
+    .filter((token) => token?.visibleToCurrentUser === true && token?.culled !== true)
     .map((token, index) => {
       const tokenPoint = point(token.point, { x: NaN, y: NaN });
       const radius = finiteOr(token.markerRadius, 0);
@@ -63,8 +68,13 @@ export function hitTestProjectedTokens(screenPoint, projectedTokens = []) {
     })
     .filter(({ token, radius, distance }) => token?.tokenId !== undefined
       && radius > 0 && Number.isFinite(distance) && distance <= radius)
-    .sort((left, right) => left.distance - right.distance || right.index - left.index)
-    .at(0)?.token ?? null;
+    .sort((left, right) => {
+      if (left.distance !== right.distance) return left.distance - right.distance;
+      const leftId = String(left.token.tokenId);
+      const rightId = String(right.token.tokenId);
+      return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+    })
+    .map(({ token }) => token);
 }
 
 function localPoint(element, event) {
@@ -90,6 +100,7 @@ export class PanelInputController {
     getTokenById,
     getRenderModel,
     onSelectionChanged,
+    onOverlapChooser,
     onViewChanged,
     onMovementPreview,
     onActionResult,
@@ -109,6 +120,7 @@ export class PanelInputController {
     this.getTokenById = typeof getTokenById === "function" ? getTokenById : () => null;
     this.getRenderModel = typeof getRenderModel === "function" ? getRenderModel : () => null;
     this.onSelectionChanged = onSelectionChanged;
+    this.onOverlapChooser = onOverlapChooser;
     this.onViewChanged = onViewChanged;
     this.onMovementPreview = onMovementPreview;
     this.onActionResult = onActionResult;
@@ -126,6 +138,8 @@ export class PanelInputController {
     this.dragStartTactical = undefined;
     this.dragGrabOffset = undefined;
     this.movementPreview = undefined;
+    this.overlapCycleKey = undefined;
+    this.overlapCycleIndex = 0;
     this.attached = false;
 
     this.handlePointerDown = this.handlePointerDown.bind(this);
@@ -195,7 +209,25 @@ export class PanelInputController {
   }
 
   selectAt(screenPoint) {
-    const token = this.projectedTokenAt(screenPoint);
+    const candidates = getProjectedTokenCandidates(screenPoint, this.currentModel().tokens);
+    let token = candidates[0];
+    if (candidates.length > 1) {
+      const key = candidates.map(({ tokenId }) => String(tokenId)).join("|");
+      const chooserHandled = this.onOverlapChooser?.(candidates, screenPoint) === true;
+      if (chooserHandled) {
+        this.overlapCycleKey = undefined;
+        this.overlapCycleIndex = 0;
+      } else {
+        this.overlapCycleIndex = this.overlapCycleKey === key
+          ? (this.overlapCycleIndex + 1) % candidates.length
+          : 0;
+        this.overlapCycleKey = key;
+      }
+      token = candidates[this.overlapCycleIndex];
+    } else {
+      this.overlapCycleKey = undefined;
+      this.overlapCycleIndex = 0;
+    }
     this.onSelectionChanged?.(token?.tokenId ?? null, token ?? null);
     this.requestRender?.({ type: "selection", tokenId: token?.tokenId ?? null });
     return token;

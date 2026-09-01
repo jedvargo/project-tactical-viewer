@@ -79,6 +79,7 @@ const ORTHOGRAPHIC_VIEWS = Object.freeze({
 const ROOT_TWO = Math.sqrt(2);
 const ROOT_SIX = Math.sqrt(6);
 const ROOT_THREE = Math.sqrt(3);
+const DEPTH_EPSILON = 1e-9;
 
 function basisVector(x, y, z) {
   return Object.freeze({ x, y, z });
@@ -355,12 +356,16 @@ export class ProjectionEngine {
         item,
         index,
         depth: this.depthKey(getPoint(item), camera),
-        id: item?.id === undefined || item?.id === null ? null : String(item.id)
+        id: item?.id ?? item?.tokenId,
       }))
       .sort((left, right) => {
-        if (left.depth !== right.depth) return left.depth - right.depth;
-        if (left.id !== null && right.id !== null && left.id !== right.id) {
-          return left.id < right.id ? -1 : 1;
+        if (Math.abs(left.depth - right.depth) > DEPTH_EPSILON) {
+          return left.depth - right.depth;
+        }
+        if (left.id !== null && left.id !== undefined
+          && right.id !== null && right.id !== undefined
+          && left.id !== right.id) {
+          return String(left.id) < String(right.id) ? -1 : 1;
         }
         return left.index - right.index;
       })

@@ -96,6 +96,40 @@ describe("Prompt 21 isometric rendering", () => {
     expect(model.grid.lines.some(({ axis }) => axis === "z")).toBe(true);
   });
 
+  it("draws all four isometric cameras far-to-near using projection depth and stable ties", () => {
+    const nearByView = {
+      "iso-ne": { x: 3, y: -2, z: 4 },
+      "iso-se": { x: 3, y: 2, z: 4 },
+      "iso-sw": { x: -3, y: 2, z: 4 },
+      "iso-nw": { x: -3, y: -2, z: 4 }
+    };
+
+    for (const view of ISO_VIEWS) {
+      const near = nearByView[view];
+      const far = { x: -near.x, y: -near.y, z: -near.z };
+      const tieZ = projectionEngine.describe(view).basis.depth.x
+        / projectionEngine.describe(view).basis.depth.z;
+      const model = createIsometricRenderModel({
+        view,
+        scene: scene(),
+        projectionEngine,
+        tacticalStates: [
+          tacticalState({ tokenId: "near", tacticalX: near.x, tacticalY: near.y, tacticalZ: near.z }),
+          tacticalState({ tokenId: "far", tacticalX: far.x, tacticalY: far.y, tacticalZ: far.z }),
+          tacticalState({ tokenId: "zulu", tacticalX: 1, tacticalY: 0, tacticalZ: 0 }),
+          tacticalState({ tokenId: "alpha", tacticalX: 0, tacticalY: 0, tacticalZ: tieZ })
+        ],
+        viewport: { width: 600, height: 440 },
+        zoom: 20,
+        focus: { x: 0, y: 0, z: 0 }
+      });
+
+      expect(model.tokens.map(({ tokenId }) => tokenId)).toEqual([
+        "far", "alpha", "zulu", "near"
+      ]);
+    }
+  });
+
   it("draws an isometric model through Canvas2DRendererV1", () => {
     const calls = [];
     const context = {

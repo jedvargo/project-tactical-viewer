@@ -191,4 +191,106 @@ describe("Canvas2DRendererV1", () => {
     renderInput([state({ document: tokenDocument })]);
     expect(tokenDocument.update).not.toHaveBeenCalled();
   });
+
+  it("groups two and three visible projected positions and exposes hidden-axis context", () => {
+    const common = {
+      tacticalX: 2.5,
+      tacticalY: 1.5,
+      tacticalZ: 0,
+      width: 1,
+      height: 1,
+      participating: true,
+      visibleToCurrentUser: true
+    };
+    const two = createTopRenderModel({
+      scene: scene(),
+      tacticalStates: [
+        state({ ...common, tokenId: "upper", name: "Upper", tacticalZ: 4 }),
+        state({ ...common, tokenId: "lower", name: "Lower", tacticalZ: 1 })
+      ],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+    const three = createTopRenderModel({
+      scene: scene(),
+      tacticalStates: [
+        state({ ...common, tokenId: "upper", tacticalZ: 4 }),
+        state({ ...common, tokenId: "middle", tacticalZ: 2 }),
+        state({ ...common, tokenId: "lower", tacticalZ: 1 })
+      ],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+
+    expect(two.stacks).toHaveLength(1);
+    expect(two.stacks[0]).toMatchObject({ count: 2, hiddenAxis: "z" });
+    expect(two.stacks[0].candidates.map(({ tokenId, hiddenAxisValue }) => [tokenId, hiddenAxisValue]))
+      .toEqual([["lower", 1], ["upper", 4]]);
+    expect(three.stacks[0].count).toBe(3);
+    expect(three.tokens.every(({ stackCount }) => stackCount === 3)).toBe(true);
+  });
+
+  it("excludes invisible overlapping tokens and reflects deletion/visibility transitions", () => {
+    const shared = { tacticalX: 2.5, tacticalY: 1.5, tacticalZ: 0 };
+    const visible = [
+      state({ tokenId: "one", ...shared }),
+      state({ tokenId: "two", ...shared }),
+      state({ tokenId: "hidden", ...shared, visibleToCurrentUser: false })
+    ];
+    const options = {
+      scene: scene(),
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    };
+
+    const before = createTopRenderModel({ ...options, tacticalStates: visible });
+    const afterVisibility = createTopRenderModel({
+      ...options,
+      tacticalStates: visible.map((token) => token.tokenId === "two"
+        ? { ...token, visibleToCurrentUser: false }
+        : token)
+    });
+    const afterDelete = createTopRenderModel({
+      ...options,
+      tacticalStates: visible.filter((token) => token.tokenId !== "two")
+    });
+
+    expect(before.tokens.map(({ tokenId }) => tokenId)).toEqual(["one", "two"]);
+    expect(before.stacks[0].count).toBe(2);
+    expect(afterVisibility.stacks).toEqual([]);
+    expect(afterDelete.stacks).toEqual([]);
+  });
+
+  it("renders a stack count and selected outline after the depth-ordered token pass", () => {
+    const model = createTopRenderModel({
+      scene: scene(),
+      tacticalStates: [
+        state({ tokenId: "near", tacticalX: 2.5, tacticalY: 1.5, tacticalZ: 0 }),
+        state({ tokenId: "far", tacticalX: 2.5, tacticalY: 1.5, tacticalZ: 1 })
+      ],
+      selectedTokenId: "far",
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+    const context = fakeContext();
+
+    new Canvas2DRendererV1().render({
+      canvas: { width: 1200, height: 800 },
+      context,
+      viewport: { width: 600, height: 400 },
+      devicePixelRatio: 2,
+      model
+    });
+
+    expect(context.calls).toContainEqual(["fillText", "x2", 312, 188]);
+    const lastSelectionDash = context.calls.findLastIndex(([name, value]) =>
+      name === "setLineDash" && value?.[0] === 5
+    );
+    const lastTokenArc = context.calls.findLastIndex(([name]) => name === "arc");
+    expect(lastSelectionDash).toBeGreaterThan(lastTokenArc - 2);
+  });
 });

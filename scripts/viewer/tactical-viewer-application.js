@@ -214,6 +214,10 @@ export function createTacticalViewerApplicationClass({
       this.pitchSelect = undefined;
       this.selectedTokenReadout = undefined;
       this.actionMessageElement = undefined;
+      this.overlapChooserElement = undefined;
+      this.overlapChooserSelect = undefined;
+      this.overlapChooserCandidates = [];
+      this.overlapChooserPanelIndex = 0;
       this.linkControls = {};
       this.inputControllers = [];
       this.attached = false;
@@ -356,6 +360,46 @@ export function createTacticalViewerApplicationClass({
         tokenId: tokenId ?? null,
         panelIndex
       });
+    }
+
+    hideOverlapChooser() {
+      if (this.overlapChooserElement) this.overlapChooserElement.hidden = true;
+      this.overlapChooserCandidates = [];
+    }
+
+    showOverlapChooser(panelIndex, candidates = []) {
+      const visibleCandidates = candidates
+        .filter((candidate) => candidate?.visibleToCurrentUser === true)
+        .filter((candidate) => candidate?.tokenId !== undefined && candidate?.tokenId !== null)
+        .slice()
+        .sort((left, right) => {
+          const leftId = String(left.tokenId);
+          const rightId = String(right.tokenId);
+          return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+        });
+      if (visibleCandidates.length < 2 || !this.overlapChooserElement || !this.overlapChooserSelect) {
+        this.hideOverlapChooser();
+        return false;
+      }
+      const select = this.overlapChooserSelect;
+      if (typeof select.replaceChildren === "function") select.replaceChildren();
+      else if (Array.isArray(select.children)) select.children.length = 0;
+      for (const candidate of visibleCandidates) {
+        const option = this.domDocument.createElement("option");
+        option.value = String(candidate.tokenId);
+        const label = candidate.name || candidate.tokenId;
+        const axis = candidate.hiddenAxisLabel
+          ? ` · ${candidate.hiddenAxisLabel}=${candidate.hiddenAxisValue}`
+          : "";
+        option.textContent = `${label}${axis}`;
+        select.appendChild(option);
+      }
+      select.value = String(visibleCandidates[0].tokenId);
+      this.overlapChooserCandidates = visibleCandidates;
+      this.overlapChooserPanelIndex = panelIndex;
+      this.overlapChooserElement.hidden = false;
+      select.focus?.();
+      return true;
     }
 
     getSelectedTacticalState(panelIndex = 0) {
@@ -720,6 +764,7 @@ export function createTacticalViewerApplicationClass({
         tacticalUpdateService: this.tacticalUpdateService,
         getTokenById: (tokenId) => this.getTokenById(tokenId),
         onSelectionChanged: (tokenId) => this.handleSelectionChanged(tokenId, index),
+        onOverlapChooser: (candidates) => this.showOverlapChooser(index, candidates),
         onViewChanged: (change) => this.handlePanelViewChanged(index, change),
         onMovementPreview: (preview) => this.handleMovementPreview(preview),
         onActionResult: (result) => this.handleActionResult(result),
@@ -890,6 +935,28 @@ export function createTacticalViewerApplicationClass({
       actionMessage.setAttribute?.("aria-live", "polite");
       setRole(actionMessage, "action-message");
       root.append(toolbar, panelGrid);
+      const overlapChooser = this.domDocument.createElement("div");
+      addClass(overlapChooser, "tactical-viewer-overlap-chooser");
+      setRole(overlapChooser, "overlap-chooser");
+      overlapChooser.hidden = true;
+      const overlapLabel = this.domDocument.createElement("label");
+      overlapLabel.textContent = "Choose visible overlapping token";
+      const overlapSelect = this.domDocument.createElement("select");
+      setRole(overlapSelect, "overlap-chooser-select");
+      overlapSelect.setAttribute?.("aria-label", "Choose visible overlapping token");
+      overlapSelect.tabIndex = 0;
+      overlapSelect.addEventListener?.("change", () => {
+        const selected = this.overlapChooserCandidates.find((candidate) =>
+          String(candidate.tokenId) === String(overlapSelect.value)
+        );
+        if (!selected) return;
+        const selectedPanelIndex = this.overlapChooserPanelIndex;
+        this.hideOverlapChooser();
+        this.handleSelectionChanged(selected.tokenId, selectedPanelIndex);
+      });
+      overlapLabel.appendChild(overlapSelect);
+      overlapChooser.appendChild(overlapLabel);
+      root.appendChild(overlapChooser);
       root.appendChild(selectedTokenReadout);
       root.appendChild(actionMessage);
 
@@ -899,6 +966,8 @@ export function createTacticalViewerApplicationClass({
       this.pitchSelect = this.panelElements[0]?.querySelector?.('[data-role="pitch-select"]');
       this.selectedTokenReadout = selectedTokenReadout;
       this.actionMessageElement = actionMessage;
+      this.overlapChooserElement = overlapChooser;
+      this.overlapChooserSelect = overlapSelect;
       this.setPanelGridStyles();
       this.updateLinkControls();
       this.updateInteractionControls();
