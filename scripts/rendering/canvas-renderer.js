@@ -59,20 +59,26 @@ function zBounds(tacticalStates = []) {
   };
 }
 
-function cameraForNorth({ grid, viewport, zoom, focus, tacticalStates }) {
+function cameraForOrthographic({ definition, grid, viewport, zoom, focus, tacticalStates }) {
   const { width, height } = dimensionsOf(viewport);
+  const isTop = definition.visibleAxes.includes("y") && definition.hiddenAxis === "z";
+  const horizontalAxis = definition.horizontal.axis;
+  const horizontalExtent = horizontalAxis === "x" ? grid.columns : grid.rows;
+  if (isTop) return cameraForTop({ grid, viewport, zoom, focus });
+
   const bounds = zBounds(tacticalStates);
   const fitScale = Math.min(
-    width / Math.max(1, grid.columns),
+    width / Math.max(1, horizontalExtent),
     height / Math.max(1, bounds.max - bounds.min)
   );
+  const defaultFocus = {
+    x: horizontalAxis === "x" ? grid.columns / 2 : 0,
+    y: horizontalAxis === "y" ? grid.rows / 2 : 0,
+    z: (bounds.min + bounds.max) / 2
+  };
   return {
-    view: "north",
-    focus: focus ?? {
-      x: grid.columns / 2,
-      y: 0,
-      z: (bounds.min + bounds.max) / 2
-    },
+    view: definition.id,
+    focus: focus ?? defaultFocus,
     scale: positiveOr(zoom, fitScale),
     screenCenter: { x: width / 2, y: height / 2 }
   };
@@ -97,25 +103,32 @@ function projectedGrid({ grid, camera, projectionEngine }) {
   });
 }
 
-function projectedNorthGrid({ grid, camera, projectionEngine, zRange }) {
-  const verticalLines = grid.verticalLines.map((line) => ({
-    start: projectionEngine.projectPoint({ x: line.x, y: 0, z: zRange.min }, camera),
-    end: projectionEngine.projectPoint({ x: line.x, y: 0, z: zRange.max }, camera),
-    major: line.x === 0 || line.x === grid.columns
+function projectedVerticalGrid({ grid, camera, projectionEngine, zRange, definition }) {
+  const horizontalAxis = definition.horizontal.axis;
+  const extent = horizontalAxis === "x" ? grid.columns : grid.rows;
+  const pointAt = (horizontal, z) => ({
+    x: horizontalAxis === "x" ? horizontal : 0,
+    y: horizontalAxis === "y" ? horizontal : 0,
+    z
+  });
+  const verticalLines = Array.from({ length: extent + 1 }, (_, index) => ({
+    start: projectionEngine.projectPoint(pointAt(index, zRange.min), camera),
+    end: projectionEngine.projectPoint(pointAt(index, zRange.max), camera),
+    major: index === 0 || index === extent
   }));
   const horizontalLines = Array.from(
     { length: zRange.max - zRange.min + 1 },
     (_, index) => {
       const z = zRange.min + index;
       return {
-        start: projectionEngine.projectPoint({ x: 0, y: 0, z }, camera),
-        end: projectionEngine.projectPoint({ x: grid.columns, y: 0, z }, camera),
+        start: projectionEngine.projectPoint(pointAt(0, z), camera),
+        end: projectionEngine.projectPoint(pointAt(extent, z), camera),
         major: z === 0
       };
     }
   );
   return Object.freeze({
-    columns: grid.columns,
+    columns: extent,
     rows: zRange.max - zRange.min,
     zMin: zRange.min,
     zMax: zRange.max,
@@ -131,6 +144,7 @@ function staticKey(model, width, height, dpr) {
     model.camera.scale,
     model.camera.focus.x,
     model.camera.focus.y,
+    model.camera.focus.z,
     width,
     height,
     dpr,
@@ -182,7 +196,7 @@ function visibleToken(state, projectionEngine, camera, viewport) {
 }
 
 /**
- * Build the read-only render model for a Top panel. The only token input is
+ * Build the read-only render model for an orthographic panel. The only token input is
  * already visibility-filtered TacticalTokenState data; TokenDocuments never
  * cross this boundary.
  */
@@ -200,21 +214,22 @@ function createOrthographicRenderModel({
   movementPreview = null
 } = {}) {
   const gridGeometry = coordinateAdapter.getTopGrid(scene);
-  const camera = view === "north"
-    ? cameraForNorth({
-      grid: gridGeometry,
-      viewport,
-      zoom,
-      focus,
-      tacticalStates
-    })
-    : cameraForTop({ grid: gridGeometry, viewport, zoom, focus });
-  const grid = view === "north"
-    ? projectedNorthGrid({
+  const definition = projectionEngine.describe(view);
+  const camera = cameraForOrthographic({
+    definition,
+    grid: gridGeometry,
+    viewport,
+    zoom,
+    focus,
+    tacticalStates
+  });
+  const grid = definition.visibleAxes.includes("z")
+    ? projectedVerticalGrid({
       grid: gridGeometry,
       camera,
       projectionEngine,
-      zRange: zBounds(tacticalStates)
+      zRange: zBounds(tacticalStates),
+      definition
     })
     : projectedGrid({ grid: gridGeometry, camera, projectionEngine });
   const tokens = Object.freeze(
@@ -256,6 +271,26 @@ export function createNorthRenderModel(options = {}) {
   return createOrthographicRenderModel({ ...options, view: "north" });
 }
 
+export function createSouthRenderModel(options = {}) {
+  return createOrthographicRenderModel({ ...options, view: "south" });
+}
+
+export function createEastRenderModel(options = {}) {
+  return createOrthographicRenderModel({ ...options, view: "east" });
+}
+
+export function createWestRenderModel(options = {}) {
+  return createOrthographicRenderModel({ ...options, view: "west" });
+}
+
+export const RENDERABLE_ORTHOGRAPHIC_VIEW_IDS = Object.freeze([
+  "top", "north", "south", "east", "west"
+]);
+
+export function isRenderableOrthographicView(view) {
+  return RENDERABLE_ORTHOGRAPHIC_VIEW_IDS.includes(view);
+}
+
 /** Interface boundary for replaceable tactical Canvas2D renderers. */
 export class Canvas2DRenderer {
   render() {
@@ -287,7 +322,7 @@ function drawArrowHead(context, point, vector) {
   context.lineTo(right.x, right.y);
 }
 
-/** Concrete read-only schematic renderer for the v1 Top projection. */
+/** Concrete read-only schematic renderer for the currently renderable orthographic views. */
 export class Canvas2DRendererV1 extends Canvas2DRenderer {
   constructor({
     coordinateAdapter = new CoordinateAdapter(),
@@ -315,8 +350,8 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       selectedTokenId: input?.state?.selectedTokenId,
       movementPreview: input?.state?.movementPreview
     };
-    if (panel.view === "north") return createNorthRenderModel(modelOptions);
-    return createTopRenderModel(modelOptions);
+    if (!isRenderableOrthographicView(panel.view)) return createTopRenderModel(modelOptions);
+    return createOrthographicRenderModel({ ...modelOptions, view: panel.view });
   }
 
   drawStatic(context, model, width, height, dpr = 1, transform = true) {

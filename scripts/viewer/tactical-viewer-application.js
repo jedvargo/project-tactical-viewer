@@ -1,5 +1,6 @@
 import { ALLOWED_PITCHES, MODULE_ID } from "../constants.js";
 import { ProjectionEngine } from "../projection/projection-engine.js";
+import { isRenderableOrthographicView } from "../rendering/canvas-renderer.js";
 import { VIEW_REGISTRY } from "../view-registry.js";
 import {
   DEFAULT_LOGICAL_ZOOM,
@@ -41,7 +42,7 @@ function documentFor(options) {
 
 function viewFor(layout, registry) {
   const requested = layout?.panels?.[0]?.view;
-  return registry.has(requested) ? requested : "top";
+  return registry.has(requested) && isRenderableOrthographicView(requested) ? requested : "top";
 }
 
 function layoutFor(scene, persistenceService) {
@@ -255,7 +256,7 @@ export function createTacticalViewerApplicationClass({
         const control = this.element?.querySelector?.(`[data-role="${role}"]`);
         if (control) control.disabled = disabled;
       }
-      const pitchDisabled = this.state.panels[0]?.view !== "north"
+      const pitchDisabled = !["north", "south", "east", "west"].includes(this.state.panels[0]?.view)
         || selected?.canCurrentUserRotate !== true;
       if (this.pitchSelect) {
         this.pitchSelect.disabled = pitchDisabled;
@@ -341,7 +342,7 @@ export function createTacticalViewerApplicationClass({
       const viewSelect = this.domDocument.createElement("select");
       viewSelect.setAttribute?.("aria-label", "Tactical projection");
       setRole(viewSelect, "view-select");
-      for (const view of this.viewRegistry.list()) {
+      for (const view of this.viewRegistry.list().filter(({ id }) => isRenderableOrthographicView(id))) {
         const option = this.domDocument.createElement("option");
         option.value = view.id;
         option.textContent = view.name;

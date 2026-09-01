@@ -196,13 +196,15 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: Manual Gate 3 could not be run because no linked or installed Foundry VTT v14 test environment/world was available; automated synchronization and canonical-state coverage passed.
 
 ### P18 — South/East/West
-- [ ] South rendering.
-- [ ] East rendering.
-- [ ] West rendering.
-- [ ] Correct mirrored axes.
-- [ ] X/Z and Y/Z drag semantics.
-- [ ] Shared input path; no copy/paste divergence.
-- [ ] Orthographic projection acceptance tests.
+- [x] South rendering.
+- [x] East rendering.
+- [x] West rendering.
+- [x] Correct mirrored axes.
+- [x] X/Z and Y/Z drag semantics.
+- [x] Shared input path; no copy/paste divergence.
+- [x] Orthographic projection acceptance tests.
+- [!] Manual Foundry v14 five-view smoke check.
+  - Blocked: no linked or installed Foundry VTT v14 executable/test World was available for switching one panel through Top, North, South, East, and West; automated five-view render/input coverage passed.
 
 ---
 

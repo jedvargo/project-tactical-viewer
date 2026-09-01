@@ -205,6 +205,18 @@ export class TacticalUpdateService {
     return this.moveVerticalPlane(tokenOrPlaceable, scene, delta, snapshot, "y");
   }
 
+  /** Commit the one partial update selected by an orthographic projection. */
+  async moveVisibleAxes(tokenOrPlaceable, scene, visibleAxes, delta, snapshot) {
+    if (!Array.isArray(visibleAxes)) return rejected("invalid-projection");
+    const method = {
+      "x,y": "moveXY",
+      "x,z": "moveXZ",
+      "y,z": "moveYZ"
+    }[visibleAxes.join(",")];
+    if (!method) return rejected("invalid-projection");
+    return this[method](tokenOrPlaceable, scene, delta, snapshot);
+  }
+
   async moveVerticalPlane(tokenOrPlaceable, scene, delta, snapshot, horizontalAxis) {
     try {
       const horizontal = deltaFor(delta, [horizontalAxis, "z"]);

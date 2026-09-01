@@ -22,8 +22,9 @@ function samePointer(event, pointerId) {
   return pointerId === undefined || event?.pointerId === pointerId;
 }
 
-function isOrthographicView(view) {
-  return ["top", "north"].includes(view);
+function orthographicDefinition(projectionEngine, view) {
+  const definition = projectionEngine.describe(view);
+  return definition.basis ? null : definition;
 }
 
 function tacticalPoint(state) {
@@ -202,7 +203,8 @@ export class PanelInputController {
 
   startTokenDrag(local, token) {
     const view = this.currentCamera().view;
-    if (!isOrthographicView(view)
+    const definition = orthographicDefinition(this.projectionEngine, view);
+    if (!definition
       || token?.visibleToCurrentUser === false
       || token?.canCurrentUserMove !== true) return false;
     const document = this.getTokenById(token.tokenId);
@@ -219,12 +221,10 @@ export class PanelInputController {
     this.dragDocument = document;
     this.dragSnapshot = this.tacticalUpdateService.captureInteractionSnapshot(document);
     this.dragStartTactical = current;
-    this.dragGrabOffset = {
-      x: pointerTactical.x - current.tacticalX,
-      ...(view === "north"
-        ? { z: pointerTactical.z - current.tacticalZ }
-        : { y: pointerTactical.y - current.tacticalY })
-    };
+    this.dragGrabOffset = Object.fromEntries(definition.visibleAxes.map((axis) => [
+      axis,
+      pointerTactical[axis] - tacticalPoint(current)[axis]
+    ]));
     this.onSelectionChanged?.(token.tokenId, token);
     return true;
   }
@@ -240,15 +240,18 @@ export class PanelInputController {
     const pointerTactical = this.projectionEngine.inversePoint(local, this.currentCamera(), {
       preserve: tacticalPoint(this.dragStartTactical)
     });
-    const view = this.currentCamera().view;
-    let delta;
+    const definition = orthographicDefinition(
+      this.projectionEngine,
+      this.currentCamera().view
+    );
+    if (!definition) return false;
+    let delta = Object.fromEntries(definition.visibleAxes.map((axis) => [
+      axis,
+      Math.round(pointerTactical[axis] - this.dragGrabOffset[axis]
+        - tacticalPoint(this.dragStartTactical)[axis])
+    ]));
     let previewPosition;
-    if (view === "north") {
-      delta = {
-        x: Math.round(pointerTactical.x - this.dragGrabOffset.x - this.dragStartTactical.tacticalX),
-        z: Math.round(pointerTactical.z - this.dragGrabOffset.z - this.dragStartTactical.tacticalZ)
-      };
-    } else {
+    if (definition.visibleAxes.includes("x") && definition.visibleAxes.includes("y")) {
       const snapped = this.coordinateAdapter.snapTacticalAnchor(
         this.dragDocument,
         this.scene,
@@ -267,12 +270,13 @@ export class PanelInputController {
       this.setMovementPreview(null);
       return true;
     }
-    const tacticalX = this.dragStartTactical.tacticalX + delta.x;
-    const tacticalY = this.dragStartTactical.tacticalY + (delta.y ?? 0);
-    let tacticalZ = this.dragStartTactical.tacticalZ + (delta.z ?? 0);
+    const start = tacticalPoint(this.dragStartTactical);
+    const tacticalX = start.x + (delta.x ?? 0);
+    const tacticalY = start.y + (delta.y ?? 0);
+    let tacticalZ = start.z + (delta.z ?? 0);
     let elevation = this.dragStartTactical.elevation;
     let offGrid = this.dragStartTactical.offGrid;
-    if (view === "north" && delta.z !== 0) {
+    if (definition.visibleAxes.includes("z") && delta.z !== 0) {
       elevation = this.coordinateAdapter.moveElevationByTacticalDelta(
         this.dragStartTactical.elevation,
         delta.z,
@@ -309,18 +313,25 @@ export class PanelInputController {
     const snapshot = this.dragSnapshot;
     const token = this.dragToken;
     this.clearDragState();
-    const moveMethod = this.currentCamera().view === "north" ? "moveXZ" : "moveXY";
-    if (!preview || !document || typeof this.tacticalUpdateService?.[moveMethod] !== "function") {
+    const definition = orthographicDefinition(
+      this.projectionEngine,
+      this.currentCamera().view
+    );
+    const axisKey = definition?.visibleAxes?.join(",");
+    const moveMethod = { "x,y": "moveXY", "x,z": "moveXZ", "y,z": "moveYZ" }[axisKey];
+    const move = typeof this.tacticalUpdateService?.moveVisibleAxes === "function"
+      ? this.tacticalUpdateService.moveVisibleAxes.bind(this.tacticalUpdateService)
+      : (typeof this.tacticalUpdateService?.[moveMethod] === "function"
+        ? this.tacticalUpdateService[moveMethod].bind(this.tacticalUpdateService)
+        : null);
+    if (!preview || !document || !move) {
       this.setMovementPreview(null);
       return null;
     }
 
-    const result = await this.tacticalUpdateService[moveMethod](
-      document,
-      this.scene,
-      preview.delta,
-      snapshot
-    );
+    const result = typeof this.tacticalUpdateService?.moveVisibleAxes === "function"
+      ? await move(document, this.scene, definition.visibleAxes, preview.delta, snapshot)
+      : await move(document, this.scene, preview.delta, snapshot);
     this.setMovementPreview(null);
     this.onActionResult?.(result, token);
     return result;

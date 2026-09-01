@@ -193,6 +193,27 @@ describe("TacticalViewerApplication", () => {
     expect(scheduler.pendingCount()).toBe(1);
   });
 
+  it("offers every renderable orthographic view and does not present deferred isometrics as active", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+
+    const select = application.element.querySelector('[data-role="view-select"]');
+    expect(select.children.map((option) => option.value)).toEqual([
+      "top", "north", "south", "east", "west"
+    ]);
+  });
+
   it("updates the panel viewport when its observed size changes", async () => {
     const scheduler = createScheduler();
     const document = createFakeDocument();

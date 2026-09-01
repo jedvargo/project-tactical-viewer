@@ -203,6 +203,27 @@ describe("TacticalUpdateService", () => {
     expect(result).toMatchObject({ status: "accepted", update: { elevation: 15 } });
   });
 
+  it.each([
+    [["x", "z"], { x: 1, z: 1 }, "x"],
+    [["y", "z"], { y: -1, z: 1 }, "y"]
+  ])("routes %j through one shared visible-axis update", async (visibleAxes, delta, horizontalAxis) => {
+    const { scene, service } = makeService();
+    const token = makeToken();
+
+    const result = await service.moveVisibleAxes(
+      token,
+      scene,
+      visibleAxes,
+      delta,
+      service.captureSnapshot(token)
+    );
+
+    expect(result.status).toBe("accepted");
+    expect(token.update).toHaveBeenCalledTimes(1);
+    expect(token.update.mock.calls[0][0]).toHaveProperty(horizontalAxis);
+    expect(token.update.mock.calls[0][0]).toHaveProperty("elevation", 5);
+  });
+
   it("captures only canonical document fields and has no renderer or hook dependency", () => {
     const { service } = makeService();
     const token = makeToken({ x: 12, y: 24, elevation: -5, rotation: 90, pitch: -45 });
