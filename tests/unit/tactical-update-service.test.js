@@ -6,6 +6,7 @@ import { ElevationAdapter } from "../../scripts/model/elevation-adapter.js";
 import { OrientationAdapter } from "../../scripts/model/orientation-adapter.js";
 import { PermissionService } from "../../scripts/permission-service.js";
 import { TacticalUpdateService } from "../../scripts/tactical-update-service.js";
+import { TacticalTokenState } from "../../scripts/model/tactical-token-state.js";
 import { createFakeSquareGrid, makeSquareScene } from "../helpers/fake-grid.js";
 
 function makeToken({
@@ -64,6 +65,44 @@ function makeService() {
 }
 
 describe("TacticalUpdateService", () => {
+  it.each([-90, -45, 0, 45, 90])("writes each supported pitch value: %d", async (pitch) => {
+    const { service } = makeService();
+    const token = makeToken();
+
+    const result = await service.setPitch(token, pitch, service.captureSnapshot(token));
+
+    expect(result).toMatchObject({
+      status: "accepted",
+      update: { [`flags.${MODULE_ID}.pitch`]: pitch }
+    });
+  });
+
+  it("rejects pitch writes when rotation is locked", async () => {
+    const { service } = makeService();
+    const token = makeToken({ lockRotation: true });
+
+    const result = await service.setPitch(token, 45, service.captureSnapshot(token));
+
+    expect(result).toMatchObject({ status: "rejected", reason: "rotation-locked" });
+    expect(token.update).not.toHaveBeenCalled();
+  });
+
+  it("exposes North's accepted X/Z update as the correct Top/canonical state", async () => {
+    const { scene, service } = makeService();
+    const token = makeToken({ x: 100, y: 200, elevation: 5 });
+
+    await service.moveXZ(token, scene, { x: 1, z: -1 }, service.captureSnapshot(token));
+
+    const state = new TacticalTokenState().build(token, scene);
+    expect(state).toMatchObject({
+      tacticalX: 2.5,
+      tacticalY: 2.5,
+      tacticalZ: 0,
+      elevation: 0
+    });
+    expect(token.y).toBe(200);
+  });
+
   it("builds exact partial payloads for XY, XZ, YZ, heading, and pitch actions", async () => {
     const { scene, service } = makeService();
     const xy = makeToken();

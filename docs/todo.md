@@ -185,13 +185,15 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: no Foundry VTT v14 executable or test World is available in this workspace; automated Foundry-shaped movement, heading, permission, conflict, and redraw coverage passed.
 
 ### P17 — North X/Z movement + pitch
-- [ ] North renderer using shared renderer/projection engine.
-- [ ] North drag changes X/Z and preserves Y.
-- [ ] Elevation update uses Scene grid distance.
-- [ ] Pitch editor.
-- [ ] Top/North stay synchronized.
-- [ ] Multi-client XYZ smoke test.
-- [ ] Gate 3 minimum useful 3D combat passed.
+- [x] North renderer using shared renderer/projection engine.
+- [x] North drag changes X/Z and preserves Y.
+- [x] Elevation update uses Scene grid distance.
+- [x] Pitch editor.
+- [x] Top/North stay synchronized.
+- [!] Multi-client XYZ smoke test.
+  - Blocked: no linked or installed Foundry VTT v14 test environment/world was available for the required two-client verification.
+- [!] Gate 3 minimum useful 3D combat passed.
+  - Blocked: Manual Gate 3 could not be run because no linked or installed Foundry VTT v14 test environment/world was available; automated synchronization and canonical-state coverage passed.
 
 ### P18 — South/East/West
 - [ ] South rendering.

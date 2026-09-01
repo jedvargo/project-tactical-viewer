@@ -47,6 +47,37 @@ function cameraForTop({ grid, viewport, zoom, focus }) {
   };
 }
 
+function zBounds(tacticalStates = []) {
+  const levels = tacticalStates
+    .map((state) => state?.tacticalZ)
+    .filter((value) => typeof value === "number" && Number.isFinite(value));
+  const minimum = Math.min(0, ...(levels.length ? levels : [0]));
+  const maximum = Math.max(0, ...(levels.length ? levels : [0]));
+  return {
+    min: Math.floor(minimum) - 2,
+    max: Math.ceil(maximum) + 2
+  };
+}
+
+function cameraForNorth({ grid, viewport, zoom, focus, tacticalStates }) {
+  const { width, height } = dimensionsOf(viewport);
+  const bounds = zBounds(tacticalStates);
+  const fitScale = Math.min(
+    width / Math.max(1, grid.columns),
+    height / Math.max(1, bounds.max - bounds.min)
+  );
+  return {
+    view: "north",
+    focus: focus ?? {
+      x: grid.columns / 2,
+      y: 0,
+      z: (bounds.min + bounds.max) / 2
+    },
+    scale: positiveOr(zoom, fitScale),
+    screenCenter: { x: width / 2, y: height / 2 }
+  };
+}
+
 function projectedGrid({ grid, camera, projectionEngine }) {
   const verticalLines = grid.verticalLines.map((line) => ({
     start: projectionEngine.projectPoint({ x: line.x, y: line.fromY, z: 0 }, camera),
@@ -61,6 +92,33 @@ function projectedGrid({ grid, camera, projectionEngine }) {
   return Object.freeze({
     columns: grid.columns,
     rows: grid.rows,
+    verticalLines: Object.freeze(verticalLines),
+    horizontalLines: Object.freeze(horizontalLines)
+  });
+}
+
+function projectedNorthGrid({ grid, camera, projectionEngine, zRange }) {
+  const verticalLines = grid.verticalLines.map((line) => ({
+    start: projectionEngine.projectPoint({ x: line.x, y: 0, z: zRange.min }, camera),
+    end: projectionEngine.projectPoint({ x: line.x, y: 0, z: zRange.max }, camera),
+    major: line.x === 0 || line.x === grid.columns
+  }));
+  const horizontalLines = Array.from(
+    { length: zRange.max - zRange.min + 1 },
+    (_, index) => {
+      const z = zRange.min + index;
+      return {
+        start: projectionEngine.projectPoint({ x: 0, y: 0, z }, camera),
+        end: projectionEngine.projectPoint({ x: grid.columns, y: 0, z }, camera),
+        major: z === 0
+      };
+    }
+  );
+  return Object.freeze({
+    columns: grid.columns,
+    rows: zRange.max - zRange.min,
+    zMin: zRange.min,
+    zMax: zRange.max,
     verticalLines: Object.freeze(verticalLines),
     horizontalLines: Object.freeze(horizontalLines)
   });
@@ -128,7 +186,8 @@ function visibleToken(state, projectionEngine, camera, viewport) {
  * already visibility-filtered TacticalTokenState data; TokenDocuments never
  * cross this boundary.
  */
-export function createTopRenderModel({
+function createOrthographicRenderModel({
+  view,
   scene,
   coordinateAdapter = new CoordinateAdapter(),
   projectionEngine = new ProjectionEngine(),
@@ -141,8 +200,23 @@ export function createTopRenderModel({
   movementPreview = null
 } = {}) {
   const gridGeometry = coordinateAdapter.getTopGrid(scene);
-  const camera = cameraForTop({ grid: gridGeometry, viewport, zoom, focus });
-  const grid = projectedGrid({ grid: gridGeometry, camera, projectionEngine });
+  const camera = view === "north"
+    ? cameraForNorth({
+      grid: gridGeometry,
+      viewport,
+      zoom,
+      focus,
+      tacticalStates
+    })
+    : cameraForTop({ grid: gridGeometry, viewport, zoom, focus });
+  const grid = view === "north"
+    ? projectedNorthGrid({
+      grid: gridGeometry,
+      camera,
+      projectionEngine,
+      zRange: zBounds(tacticalStates)
+    })
+    : projectedGrid({ grid: gridGeometry, camera, projectionEngine });
   const tokens = Object.freeze(
     (Array.isArray(tacticalStates) ? tacticalStates : [])
       .map((state) => movementPreview?.tokenId === state?.tokenId
@@ -157,12 +231,13 @@ export function createTopRenderModel({
   );
   return Object.freeze({
     sceneId: scene?.id,
-    view: "top",
+    view,
     camera: Object.freeze(camera),
     grid,
     tokens,
     movementPreview,
     selectedTokenId,
+    axisLabels: projectionEngine.describe(view).labels,
     overlays: Object.freeze({
       grid: overlays.grid !== false,
       names: overlays.names !== false,
@@ -171,6 +246,14 @@ export function createTopRenderModel({
       pitch: overlays.pitch !== false
     })
   });
+}
+
+export function createTopRenderModel(options = {}) {
+  return createOrthographicRenderModel({ ...options, view: "top" });
+}
+
+export function createNorthRenderModel(options = {}) {
+  return createOrthographicRenderModel({ ...options, view: "north" });
 }
 
 /** Interface boundary for replaceable tactical Canvas2D renderers. */
@@ -220,7 +303,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
 
   buildModel(input) {
     const panel = input?.state?.panels?.[0] ?? {};
-    return createTopRenderModel({
+    const modelOptions = {
       scene: input.scene,
       coordinateAdapter: this.coordinateAdapter,
       projectionEngine: this.projectionEngine,
@@ -231,7 +314,9 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       overlays: panel.overlays,
       selectedTokenId: input?.state?.selectedTokenId,
       movementPreview: input?.state?.movementPreview
-    });
+    };
+    if (panel.view === "north") return createNorthRenderModel(modelOptions);
+    return createTopRenderModel(modelOptions);
   }
 
   drawStatic(context, model, width, height, dpr = 1, transform = true) {
@@ -251,6 +336,13 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
         drawLine(context, line.start, line.end);
         context.stroke?.();
       }
+    }
+    if (model.axisLabels) {
+      context.fillStyle = this.colors.text ?? DEFAULT_TEXT;
+      context.font = "12px sans-serif";
+      context.fillText?.(model.axisLabels.horizontal, 8, Math.max(14, height - 8));
+      context.fillText?.(model.axisLabels.vertical, 8, 14);
+      context.fillText?.(`Hidden: ${model.axisLabels.hidden}`, Math.max(8, width - 132), 14);
     }
     if (transform) context.restore?.();
   }

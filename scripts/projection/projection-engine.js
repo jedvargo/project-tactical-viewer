@@ -20,8 +20,8 @@ const ORTHOGRAPHIC_VIEWS = Object.freeze({
     visibleAxes: Object.freeze(["x", "z"]),
     hiddenAxis: "y",
     horizontal: Object.freeze({ axis: "x", sign: 1 }),
-    vertical: Object.freeze({ axis: "z", sign: 1 }),
-    screenUp: Object.freeze({ axis: "z", sign: 1 }),
+    vertical: Object.freeze({ axis: "z", sign: -1 }),
+    screenUp: Object.freeze({ axis: "z", sign: -1 }),
     mirroredAxis: null,
     labels: Object.freeze({
       horizontal: "+X East",

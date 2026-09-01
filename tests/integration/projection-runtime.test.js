@@ -17,8 +17,8 @@ describe("Prompt 06 runtime integration", () => {
 
     expect(runtime.getService("projectionEngine")).toBe(projectionEngine);
     expect(api.getProjectionEngine()).toBe(projectionEngine);
-    expect(api.projectPoint({ x: 2, y: 8, z: -1 }, camera)).toEqual({ x: 20, y: -10 });
-    expect(api.inversePoint({ x: 20, y: -10 }, camera, { hiddenCoordinate: 8 })).toEqual({
+    expect(api.projectPoint({ x: 2, y: 8, z: -1 }, camera)).toEqual({ x: 20, y: 10 });
+    expect(api.inversePoint({ x: 20, y: 10 }, camera, { hiddenCoordinate: 8 })).toEqual({
       x: 2,
       y: 8,
       z: -1

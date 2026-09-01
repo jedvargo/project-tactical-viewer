@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   Canvas2DRendererV1,
+  createNorthRenderModel,
   createTopRenderModel
 } from "../../scripts/rendering/canvas-renderer.js";
 import { CoordinateAdapter } from "../../scripts/model/coordinate-adapter.js";
@@ -79,6 +80,51 @@ function renderInput(states, overrides = {}) {
 }
 
 describe("Canvas2DRendererV1", () => {
+  it("builds a North X/Z model with +Z upward and explicit axis labels", () => {
+    const currentScene = scene();
+    const model = createNorthRenderModel({
+      scene: currentScene,
+      coordinateAdapter: new CoordinateAdapter(),
+      projectionEngine: new ProjectionEngine(),
+      tacticalStates: [state({ tacticalX: 2.5, tacticalY: 9, tacticalZ: 2 })],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 0, y: 9, z: 0 }
+    });
+
+    expect(model.view).toBe("north");
+    expect(model.axisLabels).toEqual({
+      horizontal: "+X East",
+      vertical: "+Z Up",
+      hidden: "+Y South"
+    });
+    expect(model.tokens[0].point).toEqual({ x: 550, y: 0 });
+  });
+
+  it("renders the compact off-grid indicator in North", () => {
+    const currentScene = scene();
+    const model = createNorthRenderModel({
+      scene: currentScene,
+      coordinateAdapter: new CoordinateAdapter(),
+      projectionEngine: new ProjectionEngine(),
+      tacticalStates: [state({ tacticalZ: 1.5, offGrid: true })],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1, z: 1.5 }
+    });
+    const context = fakeContext();
+
+    new Canvas2DRendererV1().render({
+      canvas: { width: 1200, height: 800 },
+      context,
+      viewport: { width: 600, height: 400 },
+      devicePixelRatio: 2,
+      model
+    });
+
+    expect(context.calls).toContainEqual(["fillText", "OFF GRID", 312, 244]);
+  });
+
   it("draws the projected Top grid, token center, orientation vector, and labels", () => {
     const { context, model } = renderInput([state()], { selectedTokenId: "token-1" });
     const token = model.tokens[0];

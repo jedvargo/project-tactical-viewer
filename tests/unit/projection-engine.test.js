@@ -20,7 +20,7 @@ describe("ProjectionEngine orthographic views", () => {
     const point = { x: 2, y: 4, z: 5 };
 
     expect(engine.projectPoint(point, camera("top"))).toEqual({ x: 110, y: 180 });
-    expect(engine.projectPoint(point, camera("north"))).toEqual({ x: 110, y: 220 });
+    expect(engine.projectPoint(point, camera("north"))).toEqual({ x: 110, y: 180 });
     expect(engine.projectPoint(point, camera("south"))).toEqual({ x: 90, y: 220 });
     expect(engine.projectPoint(point, camera("east"))).toEqual({ x: 120, y: 220 });
     expect(engine.projectPoint(point, camera("west"))).toEqual({ x: 80, y: 220 });
@@ -38,7 +38,7 @@ describe("ProjectionEngine orthographic views", () => {
     expect(engine.describe("north")).toMatchObject({
       visibleAxes: ["x", "z"],
       hiddenAxis: "y",
-      screenUp: { axis: "z", sign: 1 }
+      screenUp: { axis: "z", sign: -1 }
     });
     expect(engine.describe("south")).toMatchObject({
       visibleAxes: ["x", "z"],
@@ -85,7 +85,7 @@ describe("ProjectionEngine orthographic views", () => {
     const viewCamera = (view) => camera(view, { scale: 2, screenCenter: { x: 0, y: 0 } });
 
     expect(engine.projectVector(vector, viewCamera("top"))).toEqual({ x: 2, y: -4 });
-    expect(engine.projectVector(vector, viewCamera("north"))).toEqual({ x: 2, y: 6 });
+    expect(engine.projectVector(vector, viewCamera("north"))).toEqual({ x: 2, y: -6 });
     expect(engine.projectVector(vector, viewCamera("south"))).toEqual({ x: -2, y: 6 });
     expect(engine.projectVector(vector, viewCamera("east"))).toEqual({ x: 4, y: 6 });
     expect(engine.projectVector(vector, viewCamera("west"))).toEqual({ x: -4, y: 6 });

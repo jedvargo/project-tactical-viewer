@@ -1,4 +1,4 @@
-import { MODULE_ID } from "../constants.js";
+import { ALLOWED_PITCHES, MODULE_ID } from "../constants.js";
 import { ProjectionEngine } from "../projection/projection-engine.js";
 import { VIEW_REGISTRY } from "../view-registry.js";
 import {
@@ -172,6 +172,7 @@ export function createTacticalViewerApplicationClass({
       this.canvas = undefined;
       this.panelElement = undefined;
       this.zoomLabel = undefined;
+      this.pitchSelect = undefined;
       this.selectedTokenReadout = undefined;
       this.actionMessageElement = undefined;
       this.inputController = undefined;
@@ -254,6 +255,14 @@ export function createTacticalViewerApplicationClass({
         const control = this.element?.querySelector?.(`[data-role="${role}"]`);
         if (control) control.disabled = disabled;
       }
+      const pitchDisabled = this.state.panels[0]?.view !== "north"
+        || selected?.canCurrentUserRotate !== true;
+      if (this.pitchSelect) {
+        this.pitchSelect.disabled = pitchDisabled;
+        if (selected && Number.isFinite(selected.pitch)) {
+          this.pitchSelect.value = String(selected.pitch);
+        }
+      }
     }
 
     handleMovementPreview(preview) {
@@ -279,6 +288,18 @@ export function createTacticalViewerApplicationClass({
         selected.heading + delta,
         snapshot
       );
+      this.handleActionResult(result);
+      return result;
+    }
+
+    async setPitchTo(pitch) {
+      const selected = this.getSelectedTacticalState();
+      const document = selected ? this.getTokenById(selected.tokenId) : null;
+      if (!selected || !document || typeof this.tacticalUpdateService?.setPitch !== "function") {
+        return null;
+      }
+      const snapshot = this.tacticalUpdateService.captureInteractionSnapshot(document);
+      const result = await this.tacticalUpdateService.setPitch(document, pitch, snapshot);
       this.handleActionResult(result);
       return result;
     }
@@ -343,6 +364,19 @@ export function createTacticalViewerApplicationClass({
       const resetView = makeButton(this.domDocument, "Reset", "reset-view", "Reset view");
       const headingDecrease = makeButton(this.domDocument, "−45°", "heading-decrease", "Rotate heading left 45 degrees");
       const headingIncrease = makeButton(this.domDocument, "+45°", "heading-increase", "Rotate heading right 45 degrees");
+      const pitchSelect = this.domDocument.createElement("select");
+      pitchSelect.setAttribute?.("aria-label", "Pitch");
+      setRole(pitchSelect, "pitch-select");
+      for (const pitch of ALLOWED_PITCHES) {
+        const option = this.domDocument.createElement("option");
+        option.value = String(pitch);
+        option.textContent = `${pitch > 0 ? "+" : ""}${pitch}°`;
+        pitchSelect.appendChild(option);
+      }
+      pitchSelect.addEventListener?.("change", () => {
+        const pitch = Number(pitchSelect.value);
+        if (ALLOWED_PITCHES.includes(pitch)) this.setPitchTo(pitch);
+      });
       const optionsButton = makeButton(this.domDocument, "Options", "panel-options", "Panel options");
       toolbar.append(
         viewSelect,
@@ -352,6 +386,7 @@ export function createTacticalViewerApplicationClass({
         resetView,
         headingDecrease,
         headingIncrease,
+        pitchSelect,
         optionsButton
       );
 
@@ -380,6 +415,7 @@ export function createTacticalViewerApplicationClass({
       this.canvas = canvas;
       this.panelElement = panel;
       this.zoomLabel = zoomLabel;
+      this.pitchSelect = pitchSelect;
       this.selectedTokenReadout = selectedTokenReadout;
       this.actionMessageElement = actionMessage;
       const controller = this.createInputController();

@@ -22,6 +22,18 @@ function samePointer(event, pointerId) {
   return pointerId === undefined || event?.pointerId === pointerId;
 }
 
+function isOrthographicView(view) {
+  return ["top", "north"].includes(view);
+}
+
+function tacticalPoint(state) {
+  return {
+    x: state.tacticalX,
+    y: state.tacticalY,
+    z: state.tacticalZ
+  };
+}
+
 /** Clamp a logical pixels-per-cell value to the supported viewer range. */
 export function clampLogicalZoom(value) {
   if (value === Infinity) return MAX_LOGICAL_ZOOM;
@@ -189,7 +201,8 @@ export class PanelInputController {
   }
 
   startTokenDrag(local, token) {
-    if (this.currentCamera().view !== "top"
+    const view = this.currentCamera().view;
+    if (!isOrthographicView(view)
       || token?.visibleToCurrentUser === false
       || token?.canCurrentUserMove !== true) return false;
     const document = this.getTokenById(token.tokenId);
@@ -200,7 +213,7 @@ export class PanelInputController {
 
     const current = this.coordinateAdapter.toTactical(document, this.scene);
     const pointerTactical = this.projectionEngine.inversePoint(local, this.currentCamera(), {
-      preserve: current.tacticalZ
+      preserve: tacticalPoint(current)
     });
     this.dragToken = token;
     this.dragDocument = document;
@@ -208,7 +221,9 @@ export class PanelInputController {
     this.dragStartTactical = current;
     this.dragGrabOffset = {
       x: pointerTactical.x - current.tacticalX,
-      y: pointerTactical.y - current.tacticalY
+      ...(view === "north"
+        ? { z: pointerTactical.z - current.tacticalZ }
+        : { y: pointerTactical.y - current.tacticalY })
     };
     this.onSelectionChanged?.(token.tokenId, token);
     return true;
@@ -223,31 +238,58 @@ export class PanelInputController {
   previewTokenAt(local) {
     if (!this.dragDocument || !this.dragStartTactical || !this.dragGrabOffset) return false;
     const pointerTactical = this.projectionEngine.inversePoint(local, this.currentCamera(), {
-      preserve: this.dragStartTactical.tacticalZ
+      preserve: tacticalPoint(this.dragStartTactical)
     });
-    const snapped = this.coordinateAdapter.snapTacticalAnchor(
-      this.dragDocument,
-      this.scene,
-      {
-        x: pointerTactical.x - this.dragGrabOffset.x,
-        y: pointerTactical.y - this.dragGrabOffset.y
-      }
-    );
-    const delta = {
-      x: Math.round(snapped.tacticalX - this.dragStartTactical.tacticalX),
-      y: Math.round(snapped.tacticalY - this.dragStartTactical.tacticalY)
-    };
-    if (delta.x === 0 && delta.y === 0) {
+    const view = this.currentCamera().view;
+    let delta;
+    let previewPosition;
+    if (view === "north") {
+      delta = {
+        x: Math.round(pointerTactical.x - this.dragGrabOffset.x - this.dragStartTactical.tacticalX),
+        z: Math.round(pointerTactical.z - this.dragGrabOffset.z - this.dragStartTactical.tacticalZ)
+      };
+    } else {
+      const snapped = this.coordinateAdapter.snapTacticalAnchor(
+        this.dragDocument,
+        this.scene,
+        {
+          x: pointerTactical.x - this.dragGrabOffset.x,
+          y: pointerTactical.y - this.dragGrabOffset.y
+        }
+      );
+      delta = {
+        x: Math.round(snapped.tacticalX - this.dragStartTactical.tacticalX),
+        y: Math.round(snapped.tacticalY - this.dragStartTactical.tacticalY)
+      };
+      previewPosition = snapped.position;
+    }
+    if (Object.values(delta).every((value) => value === 0)) {
       this.setMovementPreview(null);
       return true;
     }
+    const tacticalX = this.dragStartTactical.tacticalX + delta.x;
+    const tacticalY = this.dragStartTactical.tacticalY + (delta.y ?? 0);
+    let tacticalZ = this.dragStartTactical.tacticalZ + (delta.z ?? 0);
+    let elevation = this.dragStartTactical.elevation;
+    let offGrid = this.dragStartTactical.offGrid;
+    if (view === "north" && delta.z !== 0) {
+      elevation = this.coordinateAdapter.moveElevationByTacticalDelta(
+        this.dragStartTactical.elevation,
+        delta.z,
+        this.scene
+      );
+      tacticalZ = this.coordinateAdapter.toTacticalZ(elevation, this.scene);
+      offGrid = false;
+    }
     this.setMovementPreview({
       tokenId: this.dragToken.tokenId,
-      tacticalX: this.dragStartTactical.tacticalX + delta.x,
-      tacticalY: this.dragStartTactical.tacticalY + delta.y,
-      tacticalZ: this.dragStartTactical.tacticalZ,
+      tacticalX,
+      tacticalY,
+      tacticalZ,
+      elevation,
+      offGrid,
       delta,
-      position: snapped.position,
+      ...(previewPosition ? { position: previewPosition } : {}),
       preview: true
     });
     return true;
@@ -267,12 +309,13 @@ export class PanelInputController {
     const snapshot = this.dragSnapshot;
     const token = this.dragToken;
     this.clearDragState();
-    if (!preview || !document || typeof this.tacticalUpdateService?.moveXY !== "function") {
+    const moveMethod = this.currentCamera().view === "north" ? "moveXZ" : "moveXY";
+    if (!preview || !document || typeof this.tacticalUpdateService?.[moveMethod] !== "function") {
       this.setMovementPreview(null);
       return null;
     }
 
-    const result = await this.tacticalUpdateService.moveXY(
+    const result = await this.tacticalUpdateService[moveMethod](
       document,
       this.scene,
       preview.delta,

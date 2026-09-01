@@ -458,4 +458,80 @@ describe("TacticalViewerApplication", () => {
     );
     expect(tacticalUpdateService.setHeading).toHaveBeenCalledOnce();
   });
+
+  it("exposes all five North pitch values and commits the selected value", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const tokenDocument = {
+      id: "ship",
+      x: 0,
+      y: 0,
+      elevation: 0,
+      rotation: 180,
+      flags: { "tactical-3d-viewer": { pitch: 0 } }
+    };
+    const tacticalUpdateService = {
+      captureInteractionSnapshot: vi.fn(() => ({
+        x: 0, y: 0, elevation: 0, rotation: 180, pitch: 0
+      })),
+      setPitch: vi.fn(async () => ({ status: "accepted", ok: true }))
+    };
+    const tacticalStateService = {
+      getVisibleTacticalStates: vi.fn(() => [{
+        tokenId: "ship",
+        tacticalX: 0.5,
+        tacticalY: 0.5,
+        tacticalZ: 0,
+        pitch: 0,
+        visibleToCurrentUser: true,
+        participating: true,
+        canCurrentUserMove: true,
+        canCurrentUserRotate: true
+      }])
+    };
+    const renderer = {
+      buildModel: vi.fn(() => ({
+        view: "north",
+        camera: {
+          view: "north",
+          focus: { x: 0.5, y: 0.5, z: 0 },
+          scale: 64,
+          screenCenter: { x: 200, y: 150 }
+        },
+        tokens: []
+      })),
+      render: vi.fn()
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: { ...createScene(), tokens: [tokenDocument] },
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "north" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      tacticalStateService,
+      tacticalUpdateService,
+      renderer,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    scheduler.flush();
+    application.state.selectedTokenId = "ship";
+    application.updateInteractionControls();
+
+    const pitchSelect = application.element.querySelector('[data-role="pitch-select"]');
+    expect(pitchSelect).not.toBeNull();
+    expect(pitchSelect.children.map((option) => Number(option.value))).toEqual([
+      90, 45, 0, -45, -90
+    ]);
+    pitchSelect.value = "-90";
+    pitchSelect.dispatchEvent({ type: "change" });
+
+    expect(tacticalUpdateService.setPitch).toHaveBeenCalledWith(
+      tokenDocument,
+      -90,
+      expect.any(Object)
+    );
+  });
 });
