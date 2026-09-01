@@ -118,4 +118,22 @@ describe("runtime composition root", () => {
     expect(runtime.getService("assets")).toBe(assetManager);
     expect(createModuleApi(runtime).getAssetManager()).toBe(assetManager);
   });
+
+  it("exposes configuration writes through the existing runtime services", async () => {
+    const hooks = createFakeFoundryHooks();
+    const runtime = createRuntime({ hooks });
+    const api = createModuleApi(runtime);
+    const scene = {
+      grid: { type: "square", size: 100, distance: 5 },
+      dimensions: { width: 1000, height: 800 },
+      setFlag: vi.fn(async () => true)
+    };
+    const token = { isOwner: true, update: vi.fn(async (update) => update) };
+
+    expect(api.getConfigurationUI()).toBe(runtime.getService("configurationUI"));
+    await expect(api.writeSceneConfiguration(scene, { enabled: false })).resolves.toBe(true);
+    await expect(api.writeTokenConfiguration(token, { enabled: true, pitch: 0, art: {} })).resolves.toMatchObject({
+      status: "accepted"
+    });
+  });
 });

@@ -21,6 +21,14 @@ import { TacticalUpdateService } from "./tactical-update-service.js";
 import { VisibilityService } from "./visibility-service.js";
 import { VIEW_REGISTRY } from "./view-registry.js";
 import { TacticalViewerApplication } from "./viewer/tactical-viewer-application.js";
+import { ConfigurationUIService } from "./configuration/configuration-ui.js";
+import {
+  serializeSceneConfiguration,
+  serializeTokenConfiguration,
+  writePrototypeTokenConfiguration,
+  writeSceneConfiguration,
+  writeTokenConfiguration
+} from "./configuration/configuration-controller.js";
 
 /**
  * Minimal composition root. Later prompts attach concrete services through
@@ -78,6 +86,10 @@ export function createRuntime({
     orientationAdapter,
     permissionService: resolvedPermissionService
   });
+  const resolvedConfigurationUI = new ConfigurationUIService({
+    hooks,
+    sceneEligibilityService: sceneEligibility
+  });
   const resolvedSynchronizationCoordinator = synchronizationCoordinator
     ?? new SynchronizationCoordinator({
       hooks,
@@ -106,6 +118,7 @@ export function createRuntime({
   services.set("settings", settings);
   services.set("renderer", resolvedRenderer);
   services.set("assets", resolvedAssetManager);
+  services.set("configurationUI", resolvedConfigurationUI);
 
   return {
     get initialized() {
@@ -121,6 +134,7 @@ export function createRuntime({
       registerSettings(settings);
       resolvedPersistenceService.initialize();
       resolvedSynchronizationCoordinator.start();
+      resolvedConfigurationUI.start();
       initialized = true;
       return true;
     },
@@ -246,6 +260,20 @@ export function createModuleApi(runtime) {
       .moveElevationByTacticalDelta(...args),
     getPersistenceService: () => runtime.getService("persistence"),
     getAssetManager: () => runtime.getService("assets"),
+    getConfigurationUI: () => runtime.getService("configurationUI"),
+    serializeSceneConfiguration,
+    serializeTokenConfiguration,
+    writeSceneConfiguration: (scene, source) => writeSceneConfiguration(scene, source, {
+      eligibilityService: runtime.getService("sceneEligibility")
+    }),
+    writeTokenConfiguration: (token, configuration) => writeTokenConfiguration(token, configuration, {
+      updateService: runtime.getService("tacticalUpdate")
+    }),
+    writePrototypeTokenConfiguration: (prototypeToken, configuration) => writePrototypeTokenConfiguration(
+      prototypeToken,
+      configuration,
+      { updateService: runtime.getService("tacticalUpdate") }
+    ),
     getUserPreferences: () => runtime.getService("persistence").getPreferences(),
     getTacticalState: (token, scene, options) => runtime
       .getService("tacticalState")

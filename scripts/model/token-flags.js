@@ -49,7 +49,7 @@ function rawToken(documentOrPrototype, key) {
   return document.flags?.[TOKEN_FLAG_SCOPE]?.[key];
 }
 
-function normalizeArt(value) {
+export function normalizeTokenArt(value) {
   const art = isRecord(value) ? value : {};
   const mirror = isRecord(art.mirror) ? art.mirror : {};
   const sourceViews = isRecord(art.views) ? art.views : {};
@@ -89,7 +89,17 @@ export function getTokenPitch(documentOrPrototype) {
 
 /** Read the normalized, defensive tactical-art configuration. */
 export function getTokenArt(documentOrPrototype) {
-  return normalizeArt(getTokenFlag(documentOrPrototype, TOKEN_ART_FLAG));
+  return normalizeTokenArt(getTokenFlag(documentOrPrototype, TOKEN_ART_FLAG));
+}
+
+/** Build one complete, namespaced configuration update for a TokenDocument. */
+export function buildTokenFlagUpdate({ enabled = false, pitch = 0, art = {} } = {}) {
+  return {
+    [`flags.${TOKEN_FLAG_SCOPE}.${TOKEN_SCHEMA_VERSION_FLAG}`]: CURRENT_SCHEMA_VERSION,
+    [`flags.${TOKEN_FLAG_SCOPE}.${TOKEN_PARTICIPATION_FLAG}`]: enabled === true,
+    [`flags.${TOKEN_FLAG_SCOPE}.${TOKEN_PITCH_FLAG}`]: finiteNumber(pitch) ? pitch : 0,
+    [`flags.${TOKEN_FLAG_SCOPE}.${TOKEN_ART_FLAG}`]: normalizeTokenArt(art)
+  };
 }
 
 /** Read a valid stored schema version, falling back to the current version. */

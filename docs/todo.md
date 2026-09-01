@@ -271,14 +271,15 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] Strict fallback-order tests.
 
 ### P25 — Scene/token configuration UI
-- [ ] Scene enable control.
-- [ ] Unsupported-grid validation message.
-- [ ] Placed Token participation/pitch/art controls.
-- [ ] Prototype Token defaults.
-- [ ] File Picker integration for images.
-- [ ] Advanced per-view art editor.
-- [ ] Configuration writes use documented flags/settings.
-- [ ] Gate 5 feature-complete smoke test.
+- [x] Scene enable control.
+- [x] Unsupported-grid validation message.
+- [x] Placed Token participation/pitch/art controls.
+- [x] Prototype Token defaults.
+- [x] File Picker integration for images.
+- [x] Advanced per-view art editor.
+- [x] Configuration writes use documented flags/settings.
+- [!] Gate 5 feature-complete smoke test.
+  - Blocked: no linked or installed Foundry VTT v14 executable/test World was available for the required UI-only Scene and two-ship verification; automated configuration, persistence, File Picker mapping, and runtime-update coverage passed.
 
 ---
 

@@ -3,11 +3,13 @@ import { CoordinateAdapter } from "./model/coordinate-adapter.js";
 import { ElevationAdapter } from "./model/elevation-adapter.js";
 import { OrientationAdapter } from "./model/orientation-adapter.js";
 import { getTokenPitch } from "./model/token-flags.js";
+import { buildTokenFlagUpdate } from "./model/token-flags.js";
 import { PermissionService } from "./permission-service.js";
 
 const UPDATE_ACTIONS = Object.freeze({
   MOVE: "move",
-  ROTATE: "rotate"
+  ROTATE: "rotate",
+  CONFIGURE: "configure"
 });
 
 function documentOf(tokenOrPlaceable) {
@@ -152,7 +154,9 @@ export class TacticalUpdateService {
 
     // Keep this comparison immediately adjacent to the only write. A remote
     // update to any field in this interaction cancels the stale commit.
-    const snapshotResult = this.validateSnapshot(tokenOrPlaceable, snapshot, fields);
+    const snapshotResult = fields.length > 0
+      ? this.validateSnapshot(tokenOrPlaceable, snapshot, fields)
+      : null;
     if (snapshotResult) return snapshotResult;
 
     const document = documentOf(tokenOrPlaceable);
@@ -280,6 +284,18 @@ export class TacticalUpdateService {
         fields: ["pitch"],
         action: UPDATE_ACTIONS.ROTATE,
         rotation: true
+      });
+    } catch (error) {
+      return rejected("invalid", { error });
+    }
+  }
+
+  /** Persist placed-token or prototype-token tactical defaults as one partial update. */
+  async setConfiguration(tokenOrPlaceable, configuration) {
+    try {
+      return await this.commit(tokenOrPlaceable, buildTokenFlagUpdate(configuration), {
+        fields: [],
+        action: UPDATE_ACTIONS.CONFIGURE
       });
     } catch (error) {
       return rejected("invalid", { error });
