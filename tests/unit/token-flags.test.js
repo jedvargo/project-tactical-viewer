@@ -34,6 +34,18 @@ describe("tactical token flag access", () => {
     }))).toBe(false);
   });
 
+  it.each([
+    [true, true],
+    ["true", true],
+    [false, false],
+    ["false", false],
+    [undefined, false]
+  ])("normalizes legacy participation value %j to %s", (enabled, expected) => {
+    const token = tokenWithFlags({ [MODULE_ID]: { enabled } });
+    expect(getTokenParticipation(token)).toBe(expected);
+    expect(getTacticalTokenFlags(token).enabled).toBe(expected);
+  });
+
   it("provides safe pitch, art, and current schema defaults", () => {
     const flags = getTacticalTokenFlags(tokenWithFlags({}));
 

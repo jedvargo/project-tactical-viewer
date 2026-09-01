@@ -1166,6 +1166,10 @@ export function createTacticalViewerApplicationClass({
       return root;
     }
 
+    _replaceHTML(result, content) {
+      content.replaceChildren(result);
+    }
+
     async _onRender(context, options) {
       await super._onRender?.(context, options);
       this.detachResizeObserver();

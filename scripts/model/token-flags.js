@@ -43,6 +43,10 @@ function normalizedPitch(value) {
   return ALLOWED_PITCHES.includes(value) ? value : 0;
 }
 
+function normalizedParticipation(value) {
+  return value === true || value === "true";
+}
+
 function freezeObject(value) {
   if (!isRecord(value)) return value;
   for (const child of Object.values(value)) freezeObject(child);
@@ -93,7 +97,7 @@ export function migrateTokenFlags(value) {
     };
   return freezeObject({
     schemaVersion: CURRENT_SCHEMA_VERSION,
-    enabled: source.enabled === true,
+    enabled: normalizedParticipation(source.enabled),
     pitch: normalizedPitch(source.pitch),
     art: normalizeTokenArt(legacyArt)
   });
@@ -128,7 +132,11 @@ export function getTokenFlag(documentOrPrototype, key, fallback) {
 
 /** Read the module-owned participation flag; only explicit true participates. */
 export function getTokenParticipation(documentOrPrototype) {
-  return getTokenFlag(documentOrPrototype, TOKEN_PARTICIPATION_FLAG, false) === true;
+  return normalizedParticipation(getTokenFlag(
+    documentOrPrototype,
+    TOKEN_PARTICIPATION_FLAG,
+    false
+  ));
 }
 
 /** Read the stored pitch. TacticalTokenState normalizes valid numeric values for display. */

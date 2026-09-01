@@ -13,7 +13,7 @@ import { MODULE_ID, VIEW_DEFINITIONS } from "../../scripts/constants.js";
 function formData(values) {
   return {
     get(name) {
-      return values[name] ?? null;
+      return Object.prototype.hasOwnProperty.call(values, name) ? values[name] : null;
     }
   };
 }
@@ -91,6 +91,12 @@ describe("configuration controller", () => {
     expect(serializeSceneConfiguration(formData({
       [`flags.${MODULE_ID}.enabled`]: false
     }))).toEqual({ enabled: false });
+    expect(serializeTokenConfiguration(formData({
+      [`flags.${MODULE_ID}.enabled`]: true
+    })).enabled).toBe(true);
+    expect(serializeTokenConfiguration(formData({
+      [`flags.${MODULE_ID}.enabled`]: false
+    })).enabled).toBe(false);
   });
 
   it("writes Scene flags through the existing Scene flag service and blocks unsupported enablement", async () => {
@@ -123,5 +129,37 @@ describe("configuration controller", () => {
       preset: "generic-object",
       icon: "icons/ship.webp"
     });
+  });
+
+  it.each([
+    [true, true],
+    [false, false]
+  ])("persists placed participation=%s as Boolean %s without replacing unrelated token data", async (enabled, expected) => {
+    const flags = {
+      [MODULE_ID]: { enabled: !expected, pitch: 45, art: { preset: "generic-object" } },
+      unrelated: { preserved: true }
+    };
+    const placed = {
+      ...token(),
+      flags,
+      getFlag(scope, key) { return this.flags?.[scope]?.[key]; },
+      update: vi.fn(async (update) => {
+        for (const [path, value] of Object.entries(update)) {
+          const parts = path.split(".");
+          let target = placed;
+          for (const part of parts.slice(0, -1)) target = target[part] ??= {};
+          target[parts.at(-1)] = value;
+        }
+        return placed;
+      })
+    };
+
+    await writeTokenConfiguration(placed, serializeTokenConfiguration(formData({
+      [`flags.${MODULE_ID}.enabled`]: enabled
+    })));
+
+    expect(placed.getFlag(MODULE_ID, "enabled")).toBe(expected);
+    expect(typeof placed.getFlag(MODULE_ID, "enabled")).toBe("boolean");
+    expect(placed.flags.unrelated).toEqual({ preserved: true });
   });
 });

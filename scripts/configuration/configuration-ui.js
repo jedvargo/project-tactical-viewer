@@ -65,6 +65,7 @@ function booleanInputFor(document, name, value, extra = {}) {
   }
   return inputFor(document, "checkbox", name, "true", {
     ...extra,
+    "data-dtype": "Boolean",
     checked: value === true
   });
 }
@@ -113,10 +114,10 @@ function appendTokenConfiguration({ document, form, token, kind, filePickerClass
   appendField(document, section, localize(
     "configuration.token.participate",
     "Participate in 3D Tactical Viewer"
-  ), inputFor(
-    document, "checkbox", "flags.tactical-3d-viewer.enabled", "true", {
-      checked: getTokenParticipation(token)
-    }
+  ), booleanInputFor(
+    document,
+    "flags.tactical-3d-viewer.enabled",
+    getTokenParticipation(token)
   ));
 
   const pitch = create(document, "select", { name: "flags.tactical-3d-viewer.pitch" });

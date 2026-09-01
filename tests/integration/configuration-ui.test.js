@@ -166,6 +166,66 @@ describe("configuration UI hook integration", () => {
     vi.unstubAllGlobals();
   });
 
+  it("renders placed and prototype participation through Foundry's typed Boolean input helper", () => {
+    const hooks = createFakeFoundryHooks();
+    const document = documentFactory();
+    const booleanInput = vi.fn(({ name, value }) => {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.setAttribute("name", name);
+      input.checked = value;
+      return input;
+    });
+    vi.stubGlobal("foundry", { applications: { fields: { createCheckboxInput: booleanInput } } });
+
+    const runtime = createRuntime({ hooks });
+    runtime.initialize();
+    const root = formRoot(document);
+    hooks.fire("renderApplicationV2", {
+      constructor: { name: "TokenConfig" },
+      document: {
+        documentName: "Token",
+        flags: { "tactical-3d-viewer": { enabled: true } }
+      }
+    }, root, {}, {});
+
+    const control = root.querySelector('[name="flags.tactical-3d-viewer.enabled"]');
+    expect(booleanInput).toHaveBeenCalledWith(expect.objectContaining({
+      name: "flags.tactical-3d-viewer.enabled",
+      value: true
+    }));
+    expect(control.checked).toBe(true);
+
+    const prototypeRoot = formRoot(document);
+    hooks.fire("renderApplicationV2", {
+      constructor: { name: "PrototypeTokenConfig" },
+      isPrototype: true,
+      document: { documentName: "Actor" },
+      token: {
+        documentName: "PrototypeToken",
+        flags: { "tactical-3d-viewer": { enabled: true } }
+      }
+    }, prototypeRoot, {}, {});
+    expect(booleanInput).toHaveBeenCalledTimes(2);
+    expect(prototypeRoot.querySelector('[name="flags.tactical-3d-viewer.enabled"]').checked).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it("marks the fallback token checkbox as a typed Boolean field", () => {
+    const hooks = createFakeFoundryHooks();
+    const runtime = createRuntime({ hooks });
+    runtime.initialize();
+    const document = documentFactory();
+    const root = formRoot(document);
+    hooks.fire("renderApplicationV2", {
+      constructor: { name: "TokenConfig" },
+      document: { documentName: "Token", flags: {} }
+    }, root, {}, {});
+
+    expect(root.querySelector('[name="flags.tactical-3d-viewer.enabled"]')
+      .attributes.get("data-dtype")).toBe("Boolean");
+  });
+
   it("registers the configuration hook once and invalidates runtime state on flag updates", () => {
     const hooks = createFakeFoundryHooks();
     const frames = [];

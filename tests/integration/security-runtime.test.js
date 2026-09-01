@@ -56,6 +56,22 @@ describe("runtime visibility security boundary", () => {
     expect(api.getTacticalStates).toBeUndefined();
   });
 
+  it("includes a visible token after its placed-document flag is updated, including legacy true", () => {
+    const grid = createFakeSquareGrid();
+    const scene = makeSquareScene(grid);
+    scene.id = "scene";
+    const token = makeToken({ id: "updated", visible: true, enabled: "true" });
+    scene.tokens = [token];
+    const api = createModuleApi(makeRuntime({ id: "player", isGM: false }));
+
+    expect(api.getVisibleTacticalStates(scene).map((state) => state.tokenId)).toEqual(["updated"]);
+
+    token.flags[MODULE_ID].enabled = false;
+    expect(api.getVisibleTacticalStates(scene)).toEqual([]);
+    token.flags[MODULE_ID].enabled = true;
+    expect(api.getVisibleTacticalStates(scene).map((state) => state.tokenId)).toEqual(["updated"]);
+  });
+
   it("does not expose hidden tokens to hit testing or overlap consumers", () => {
     const grid = createFakeSquareGrid();
     const scene = makeSquareScene(grid);

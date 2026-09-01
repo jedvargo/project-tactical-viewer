@@ -40,6 +40,9 @@ const RealViewerApplication = createTacticalViewerApplicationClass({
 
 class OpenPathViewerApplication extends RealViewerApplication {
   async render() {
+    if (typeof this._renderHTML !== "function" || typeof this._replaceHTML !== "function") {
+      throw new Error("Application class is not renderable because it does not implement the abstract methods _renderHTML and _replaceHTML");
+    }
     this.rendered = true;
     return this;
   }

@@ -35,6 +35,12 @@ class FakeElement {
     return child;
   }
 
+  replaceChildren(...children) {
+    this.children.forEach((child) => { child.parentElement = null; });
+    this.children = [];
+    children.forEach((child) => this.appendChild(child));
+  }
+
   setAttribute(name, value) {
     this.attributes.set(name, String(value));
   }
@@ -118,6 +124,21 @@ class FakeApplicationV2 {
   }
 }
 
+class StrictApplicationV2 extends FakeApplicationV2 {
+  async render(options = {}) {
+    if (typeof this._renderHTML !== "function" || typeof this._replaceHTML !== "function") {
+      throw new Error("Application class is not renderable because it does not implement the abstract methods _renderHTML and _replaceHTML");
+    }
+    const content = this.domDocument.createElement("div");
+    const result = await this._renderHTML({}, options);
+    this._replaceHTML(result, content, options);
+    this.element = content;
+    this.rendered = true;
+    await this._onRender({}, options);
+    return this;
+  }
+}
+
 class FakeResizeObserver {
   static instances = [];
 
@@ -159,6 +180,25 @@ describe("TacticalViewerApplication", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("renders through the Foundry v14 custom ApplicationV2 contract", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: StrictApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await expect(application.render({ force: true })).resolves.toBe(application);
+
+    expect(application.element.children).toHaveLength(1);
+    expect(application.element.querySelector("canvas")).not.toBeNull();
   });
 
   it("constructs the persisted multi-panel ApplicationV2 shell", async () => {
