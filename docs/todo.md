@@ -220,13 +220,15 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] Persist user layout.
 
 ### P20 — Linked selection/center/zoom
-- [ ] Link Selection.
-- [ ] Link Center via shared 3D focus.
-- [ ] Link Zoom via logical cell scale.
-- [ ] Independent mode for each link.
-- [ ] Hidden coordinate preserved while linked-panning.
-- [ ] Two-user different-layout smoke test.
-- [ ] Gate 4 passed.
+- [x] Link Selection.
+- [x] Link Center via shared 3D focus.
+- [x] Link Zoom via logical cell scale.
+- [x] Independent mode for each link.
+- [x] Hidden coordinate preserved while linked-panning.
+- [!] Two-user different-layout smoke test.
+  - Blocked: no linked or installed Foundry VTT v14 executable or test World was available for the required two-client manual check; automated local link-state coverage passed.
+- [!] Gate 4 passed.
+  - Blocked: Manual Gate 4 could not be run because no linked or installed Foundry VTT v14 executable or test World was available; automated local coverage passed.
 
 ---
 

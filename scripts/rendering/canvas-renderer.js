@@ -347,7 +347,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       zoom: panel.zoom,
       focus: panel.focus,
       overlays: panel.overlays,
-      selectedTokenId: input?.state?.selectedTokenId,
+      selectedTokenId: input?.selectedTokenId ?? input?.state?.selectedTokenId,
       movementPreview: input?.state?.movementPreview
     };
     if (!isRenderableOrthographicView(panel.view)) return createTopRenderModel(modelOptions);
