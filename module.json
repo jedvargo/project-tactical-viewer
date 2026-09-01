@@ -17,6 +17,23 @@
     "verified": "14",
     "maximum": "14"
   },
+  "flags": {
+    "hotReload": {
+      "extensions": [
+        "js",
+        "mjs",
+        "css",
+        "html",
+        "hbs",
+        "json"
+      ],
+      "paths": [
+        "scripts",
+        "styles",
+        "lang"
+      ]
+    }
+  },
   "styles": [
     "styles/tactical-viewer.css"
   ],

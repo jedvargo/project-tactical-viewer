@@ -112,3 +112,28 @@ npm run test:release
 temporary clean directory, checks its manifest/assets/dependency boundary, and
 imports the installed entrypoint. Real Foundry v14 acceptance remains a manual
 browser/client check; use the checklists in `tests/manual/`.
+
+## Local Foundry Development / Hot Reload
+
+For local development, remove or rename any installed release copy first, then
+link the repository into Foundry's module directory. On Linux:
+
+```bash
+ln -s /path/to/tactical-3d-viewer \
+  ~/.local/share/FoundryVTT/Data/modules/tactical-3d-viewer
+```
+
+The symlink directory name must match the module ID,
+`tactical-3d-viewer`, and `module.json` must be at the root of the linked
+repository/module directory. Start Foundry with `--hotReload` to enable
+automatic package hot reload.
+
+Hot reload is intended for runtime assets under `scripts/`, `styles/`,
+`templates/`, and `lang/`. In this repository, the manifest watches the
+directories that currently exist: `scripts/`, `styles/`, and `lang/`; the
+supported file extensions include Handlebars and HTML when template files are
+added. Some stateful or startup-level changes still require a browser reload
+or Foundry/world reload, especially module manifest structure changes,
+init/ready lifecycle changes, module enable/disable changes, or changes whose
+old runtime state is already instantiated. Hot reload does not guarantee safe
+replacement of every already-instantiated JavaScript application state.
