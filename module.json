@@ -3,6 +3,9 @@
   "title": "3D Tactical Viewer",
   "description": "Synchronized 2D tactical projections for three-dimensional battlespaces.",
   "version": "0.1.0",
+  "url": "https://github.com/jedvargo/project-tactical-viewer",
+  "manifest": "https://github.com/jedvargo/project-tactical-viewer/releases/download/v0.1.0/module.json",
+  "download": "https://github.com/jedvargo/project-tactical-viewer/releases/download/v0.1.0/tactical-3d-viewer-0.1.0.zip",
   "authors": [
     {
       "name": "3D Tactical Viewer Contributors"
