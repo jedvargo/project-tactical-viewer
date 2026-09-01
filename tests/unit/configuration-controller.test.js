@@ -84,6 +84,15 @@ describe("configuration controller", () => {
     expect(serializeSceneConfiguration(formData({}))).toEqual({ enabled: false });
   });
 
+  it("serializes typed BooleanField values as actual booleans", () => {
+    expect(serializeSceneConfiguration(formData({
+      [`flags.${MODULE_ID}.enabled`]: true
+    }))).toEqual({ enabled: true });
+    expect(serializeSceneConfiguration(formData({
+      [`flags.${MODULE_ID}.enabled`]: false
+    }))).toEqual({ enabled: false });
+  });
+
   it("writes Scene flags through the existing Scene flag service and blocks unsupported enablement", async () => {
     const supported = scene();
     await writeSceneConfiguration(supported, formData({

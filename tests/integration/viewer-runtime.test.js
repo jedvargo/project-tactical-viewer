@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MODULE_ID } from "../../scripts/constants.js";
 import { createRuntime } from "../../scripts/runtime.js";
+import { createTacticalViewerApplicationClass } from "../../scripts/viewer/tactical-viewer-application.js";
 
 class FakeViewerApplication {
   static instances = [];
@@ -16,6 +17,28 @@ class FakeViewerApplication {
     FakeViewerApplication.instances.push(this);
   }
 
+  async render() {
+    this.rendered = true;
+    return this;
+  }
+}
+
+class ApplicationV2WithReadOnlyState {
+  constructor(options = {}) {
+    this.options = options;
+    this._applicationState = Object.freeze({ inherited: true });
+  }
+
+  get state() {
+    return this._applicationState;
+  }
+}
+
+const RealViewerApplication = createTacticalViewerApplicationClass({
+  ApplicationV2: ApplicationV2WithReadOnlyState
+});
+
+class OpenPathViewerApplication extends RealViewerApplication {
   async render() {
     this.rendered = true;
     return this;
@@ -76,5 +99,19 @@ describe("viewer runtime opening", () => {
 
     expect(FakeViewerApplication.instances[0].close).toHaveBeenCalledOnce();
     expect(second).toBe(FakeViewerApplication.instances[1]);
+  });
+
+  it("opens the TacticalViewerApplication path without colliding with ApplicationV2.state", async () => {
+    const runtime = createRuntime({
+      viewerApplicationClass: OpenPathViewerApplication,
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} }
+    });
+
+    const viewer = await runtime.openViewer(scene());
+
+    expect(viewer).toBeInstanceOf(OpenPathViewerApplication);
+    expect(viewer.state).toEqual({ inherited: true });
+    expect(viewer.viewerState).toMatchObject({ panelCount: 1 });
   });
 });

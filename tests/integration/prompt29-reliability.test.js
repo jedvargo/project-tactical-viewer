@@ -139,14 +139,14 @@ describe("Prompt 29 update and asset recovery", () => {
       ApplicationV2: class {}
     });
     const application = Object.create(Application.prototype);
-    application.state = { movementPreview: { tokenId: "token-29" } };
+    application.viewerState = { movementPreview: { tokenId: "token-29" } };
     application.actionMessageElement = { textContent: "" };
     application.refreshFromDocuments = vi.fn();
     application.requestRender = vi.fn();
 
     application.handleActionResult({ status: "accepted", adjusted: true });
 
-    expect(application.state.movementPreview).toBeNull();
+    expect(application.viewerState.movementPreview).toBeNull();
     expect(application.refreshFromDocuments).toHaveBeenCalledWith({ render: false });
     expect(application.actionMessageElement.textContent).toContain("adjusted");
     expect(application.requestRender).toHaveBeenCalledWith({

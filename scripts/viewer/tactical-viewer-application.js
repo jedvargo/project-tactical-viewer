@@ -211,7 +211,7 @@ export function createTacticalViewerApplicationClass({
       this.onClosed = onClosed;
       this.reducedMotionOverride = typeof reducedMotion === "boolean" ? reducedMotion : undefined;
       this.projectionEngine = projectionEngine;
-      this.state = makeState(scene, persistenceService, viewRegistry);
+      this.viewerState = makeState(scene, persistenceService, viewRegistry);
       this.viewport = { width: 0, height: 0 };
       this.renderCount = 0;
       this.renderScheduled = false;
@@ -239,18 +239,18 @@ export function createTacticalViewerApplicationClass({
     }
 
     get panelCount() {
-      return this.state.panelCount;
+      return this.viewerState.panelCount;
     }
 
     getViewportDimensions() {
-      return { ...this.state.panels[0].dimensions };
+      return { ...this.viewerState.panels[0].dimensions };
     }
 
     getSharedFocus() {
-      const explicit = cloneFocus(this.state.sharedFocus);
+      const explicit = cloneFocus(this.viewerState.sharedFocus);
       if (explicit) return explicit;
 
-      const panelFocus = cloneFocus(this.state.panels[0]?.focus);
+      const panelFocus = cloneFocus(this.viewerState.panels[0]?.focus);
       if (panelFocus) return panelFocus;
 
       try {
@@ -268,30 +268,30 @@ export function createTacticalViewerApplicationClass({
     }
 
     initializeSharedFocus() {
-      if (!this.state.links.center || cloneFocus(this.state.sharedFocus)) return;
+      if (!this.viewerState.links.center || cloneFocus(this.viewerState.sharedFocus)) return;
       const focus = this.getSharedFocus();
       if (!focus) return;
-      this.state.sharedFocus = focus;
-      this.state.panels.forEach((panel) => { panel.focus = { ...focus }; });
+      this.viewerState.sharedFocus = focus;
+      this.viewerState.panels.forEach((panel) => { panel.focus = { ...focus }; });
     }
 
     getPanelRenderState(index) {
-      const panel = this.state.panels[index] ?? this.state.panels[0];
+      const panel = this.viewerState.panels[index] ?? this.viewerState.panels[0];
       if (!panel) return panel;
       return {
         ...panel,
-        focus: this.state.links.center ? this.getSharedFocus() : panel.focus,
-        pan: this.state.links.center ? clonePan(this.state.sharedPan) : clonePan(panel.pan),
-        zoom: this.state.links.zoom
-          ? this.state.sharedZoom
+        focus: this.viewerState.links.center ? this.getSharedFocus() : panel.focus,
+        pan: this.viewerState.links.center ? clonePan(this.viewerState.sharedPan) : clonePan(panel.pan),
+        zoom: this.viewerState.links.zoom
+          ? this.viewerState.sharedZoom
           : panel.zoom
       };
     }
 
     getSelectedTokenId(panelIndex = 0) {
-      const panel = this.state.panels[panelIndex] ?? this.state.panels[0];
-      return this.state.links.selection
-        ? this.state.selectedTokenId
+      const panel = this.viewerState.panels[panelIndex] ?? this.viewerState.panels[0];
+      return this.viewerState.links.selection
+        ? this.viewerState.selectedTokenId
         : (panel?.selectedTokenId ?? null);
     }
 
@@ -319,22 +319,22 @@ export function createTacticalViewerApplicationClass({
 
     reconcileSelection(visibleTacticalStates) {
       const visibleIds = new Set((visibleTacticalStates ?? []).map((state) => state?.tokenId));
-      if (this.state.links.selection) {
-        if (this.state.selectedTokenId !== null && !visibleIds.has(this.state.selectedTokenId)) {
-          this.state.selectedTokenId = null;
+      if (this.viewerState.links.selection) {
+        if (this.viewerState.selectedTokenId !== null && !visibleIds.has(this.viewerState.selectedTokenId)) {
+          this.viewerState.selectedTokenId = null;
         }
-        this.state.panels.forEach((panel) => {
-          panel.selectedTokenId = this.state.selectedTokenId;
+        this.viewerState.panels.forEach((panel) => {
+          panel.selectedTokenId = this.viewerState.selectedTokenId;
         });
         return;
       }
-      this.state.panels.forEach((panel) => {
+      this.viewerState.panels.forEach((panel) => {
         if (panel.selectedTokenId !== null && !visibleIds.has(panel.selectedTokenId)) {
           panel.selectedTokenId = null;
         }
       });
-      if (this.state.selectedTokenId !== null && !visibleIds.has(this.state.selectedTokenId)) {
-        this.state.selectedTokenId = null;
+      if (this.viewerState.selectedTokenId !== null && !visibleIds.has(this.viewerState.selectedTokenId)) {
+        this.viewerState.selectedTokenId = null;
       }
     }
 
@@ -342,8 +342,8 @@ export function createTacticalViewerApplicationClass({
       const deletedIds = invalidation?.deletedTokenIds ?? [];
       if (deletedIds.length > 0) {
         const deleted = new Set(deletedIds);
-        if (deleted.has(this.state.selectedTokenId)) this.state.selectedTokenId = null;
-        this.state.panels.forEach((panel) => {
+        if (deleted.has(this.viewerState.selectedTokenId)) this.viewerState.selectedTokenId = null;
+        this.viewerState.panels.forEach((panel) => {
           if (deleted.has(panel.selectedTokenId)) panel.selectedTokenId = null;
         });
       }
@@ -354,13 +354,13 @@ export function createTacticalViewerApplicationClass({
       visibleTacticalStates = this.getVisibleTacticalStates(),
       panelIndex = 0
     ) {
-      const panel = this.state.panels[panelIndex] ?? this.state.panels[0];
+      const panel = this.viewerState.panels[panelIndex] ?? this.viewerState.panels[0];
       return this.renderer?.buildModel?.({
         canvas: this.canvases[panelIndex],
         context: this.canvases[panelIndex]?.getContext?.("2d"),
         scene: this.scene,
         viewport: panel.dimensions,
-        state: this.state,
+        state: this.viewerState,
         panelIndex,
         panel: this.getPanelRenderState(panelIndex),
         selectedTokenId: this.getSelectedTokenId(panelIndex),
@@ -382,8 +382,8 @@ export function createTacticalViewerApplicationClass({
       if (this.zoomLabel && !this.panelElements.length) {
         this.zoomLabel.textContent = localizeFormat(
           "viewer.zoomLabel",
-          `${Math.round(this.state.panels[0].zoom)} px/cell`,
-          { zoom: Math.round(this.state.panels[0].zoom) }
+          `${Math.round(this.viewerState.panels[0].zoom)} px/cell`,
+          { zoom: Math.round(this.viewerState.panels[0].zoom) }
         );
       }
     }
@@ -396,11 +396,11 @@ export function createTacticalViewerApplicationClass({
       );
       if (!selected) {
         if (this.getSelectedTokenId(0) !== null) {
-          this.state.selectedTokenId = null;
-          if (this.state.links.selection) {
-            this.state.panels.forEach((panel) => { panel.selectedTokenId = null; });
+          this.viewerState.selectedTokenId = null;
+          if (this.viewerState.links.selection) {
+            this.viewerState.panels.forEach((panel) => { panel.selectedTokenId = null; });
           } else {
-            this.state.panels[0].selectedTokenId = null;
+            this.viewerState.panels[0].selectedTokenId = null;
           }
         }
         this.selectedTokenReadout.textContent = localize("viewer.readout.none", "No tactical token selected");
@@ -415,16 +415,16 @@ export function createTacticalViewerApplicationClass({
     }
 
     handleSelectionChanged(tokenId, panelIndex = 0) {
-      const panel = this.state.panels[panelIndex] ?? this.state.panels[0];
+      const panel = this.viewerState.panels[panelIndex] ?? this.viewerState.panels[0];
       if (!panel) return;
-      if (this.state.links.selection) {
-        this.state.selectedTokenId = tokenId ?? null;
-        this.state.panels.forEach((entry) => {
+      if (this.viewerState.links.selection) {
+        this.viewerState.selectedTokenId = tokenId ?? null;
+        this.viewerState.panels.forEach((entry) => {
           entry.selectedTokenId = tokenId ?? null;
         });
       } else {
         panel.selectedTokenId = tokenId ?? null;
-        if (panelIndex === 0) this.state.selectedTokenId = tokenId ?? null;
+        if (panelIndex === 0) this.viewerState.selectedTokenId = tokenId ?? null;
       }
       this.updateSelectedTokenReadout();
       this.updateInteractionControls();
@@ -488,74 +488,74 @@ export function createTacticalViewerApplicationClass({
 
     serializeLayout() {
       return {
-        panelCount: this.state.panelCount,
-        panels: this.state.panels.map((panel) => ({
+        panelCount: this.viewerState.panelCount,
+        panels: this.viewerState.panels.map((panel) => ({
           view: panel.view,
           overlays: { ...panel.overlays }
         })),
-        splits: this.state.splits.slice(),
-        links: { ...this.state.links }
+        splits: this.viewerState.splits.slice(),
+        links: { ...this.viewerState.links }
       };
     }
 
     updateLinkControls() {
       for (const [key, control] of Object.entries(this.linkControls)) {
-        if (control) control.checked = this.state.links[key] === true;
+        if (control) control.checked = this.viewerState.links[key] === true;
       }
     }
 
     async setLinkSelection(enabled) {
-      this.state.links.selection = enabled === true;
-      if (this.state.links.selection) {
-        const selected = this.state.panels[0]?.selectedTokenId
-          ?? this.state.selectedTokenId
+      this.viewerState.links.selection = enabled === true;
+      if (this.viewerState.links.selection) {
+        const selected = this.viewerState.panels[0]?.selectedTokenId
+          ?? this.viewerState.selectedTokenId
           ?? null;
-        this.state.selectedTokenId = selected;
-        this.state.panels.forEach((panel) => { panel.selectedTokenId = selected; });
+        this.viewerState.selectedTokenId = selected;
+        this.viewerState.panels.forEach((panel) => { panel.selectedTokenId = selected; });
       }
       this.updateLinkControls();
       await this.persistLayout();
-      this.requestRender({ type: "link-selection", enabled: this.state.links.selection });
-      return this.state.links.selection;
+      this.requestRender({ type: "link-selection", enabled: this.viewerState.links.selection });
+      return this.viewerState.links.selection;
     }
 
     async setLinkCenter(enabled) {
-      const wasLinked = this.state.links.center;
-      this.state.links.center = enabled === true;
-      const focus = this.state.links.center && !wasLinked
-        ? (cloneFocus(this.state.panels[0]?.focus) ?? this.getSharedFocus())
+      const wasLinked = this.viewerState.links.center;
+      this.viewerState.links.center = enabled === true;
+      const focus = this.viewerState.links.center && !wasLinked
+        ? (cloneFocus(this.viewerState.panels[0]?.focus) ?? this.getSharedFocus())
         : this.getSharedFocus();
       if (focus) {
-        this.state.sharedFocus = focus;
-        this.state.panels.forEach((panel) => { panel.focus = { ...focus }; });
+        this.viewerState.sharedFocus = focus;
+        this.viewerState.panels.forEach((panel) => { panel.focus = { ...focus }; });
       }
-      const pan = this.state.links.center && !wasLinked
-        ? clonePan(this.state.panels[0]?.pan)
-        : clonePan(this.state.sharedPan);
-      this.state.sharedPan = pan;
-      if (this.state.links.center) {
-        this.state.panels.forEach((panel) => { panel.pan = { ...pan }; });
+      const pan = this.viewerState.links.center && !wasLinked
+        ? clonePan(this.viewerState.panels[0]?.pan)
+        : clonePan(this.viewerState.sharedPan);
+      this.viewerState.sharedPan = pan;
+      if (this.viewerState.links.center) {
+        this.viewerState.panels.forEach((panel) => { panel.pan = { ...pan }; });
       }
       this.updateLinkControls();
       await this.persistLayout();
-      this.requestRender({ type: "link-center", enabled: this.state.links.center });
-      return this.state.links.center;
+      this.requestRender({ type: "link-center", enabled: this.viewerState.links.center });
+      return this.viewerState.links.center;
     }
 
     async setLinkZoom(enabled) {
-      this.state.links.zoom = enabled === true;
-      const zoom = Number.isFinite(this.state.panels[0]?.zoom)
-        ? this.state.panels[0].zoom
-        : this.state.sharedZoom;
-      this.state.sharedZoom = zoom;
-      if (this.state.links.zoom) {
-        this.state.panels.forEach((panel) => { panel.zoom = zoom; });
+      this.viewerState.links.zoom = enabled === true;
+      const zoom = Number.isFinite(this.viewerState.panels[0]?.zoom)
+        ? this.viewerState.panels[0].zoom
+        : this.viewerState.sharedZoom;
+      this.viewerState.sharedZoom = zoom;
+      if (this.viewerState.links.zoom) {
+        this.viewerState.panels.forEach((panel) => { panel.zoom = zoom; });
       }
       this.updateLinkControls();
       this.updateZoomLabel();
       await this.persistLayout();
-      this.requestRender({ type: "link-zoom", enabled: this.state.links.zoom });
-      return this.state.links.zoom;
+      this.requestRender({ type: "link-zoom", enabled: this.viewerState.links.zoom });
+      return this.viewerState.links.zoom;
     }
 
     async setLink(key, enabled) {
@@ -566,46 +566,46 @@ export function createTacticalViewerApplicationClass({
     }
 
     handlePanelViewChanged(panelIndex, change) {
-      const panel = this.state.panels[panelIndex];
+      const panel = this.viewerState.panels[panelIndex];
       if (!panel || !change) return;
       if (change.type === "pan" && change.pan) {
         const pan = clonePan(change.pan);
         panel.pan = pan;
-        if (this.state.links.center) {
-          this.state.sharedPan = pan;
-          this.state.panels.forEach((entry) => { entry.pan = { ...pan }; });
+        if (this.viewerState.links.center) {
+          this.viewerState.sharedPan = pan;
+          this.viewerState.panels.forEach((entry) => { entry.pan = { ...pan }; });
         }
       } else if (change.type === "pan" && change.focus) {
         const focus = cloneFocus(change.focus);
         if (focus) {
           panel.focus = focus;
-          if (this.state.links.center) {
-            this.state.sharedFocus = focus;
-            this.state.panels.forEach((entry) => { entry.focus = { ...focus }; });
+          if (this.viewerState.links.center) {
+            this.viewerState.sharedFocus = focus;
+            this.viewerState.panels.forEach((entry) => { entry.focus = { ...focus }; });
           }
         }
       } else if (change.type === "reset-view") {
         panel.focus = null;
         panel.pan = { x: 0, y: 0 };
-        if (this.state.links.center) {
-          this.state.sharedFocus = null;
-          this.state.sharedPan = { x: 0, y: 0 };
-          this.state.panels.forEach((entry) => { entry.focus = null; });
-          this.state.panels.forEach((entry) => { entry.pan = { x: 0, y: 0 }; });
+        if (this.viewerState.links.center) {
+          this.viewerState.sharedFocus = null;
+          this.viewerState.sharedPan = { x: 0, y: 0 };
+          this.viewerState.panels.forEach((entry) => { entry.focus = null; });
+          this.viewerState.panels.forEach((entry) => { entry.pan = { x: 0, y: 0 }; });
         }
       }
 
       if (change.type === "zoom" && Number.isFinite(change.zoom)) {
         panel.zoom = change.zoom;
-        if (this.state.links.zoom) {
-          this.state.sharedZoom = change.zoom;
-          this.state.panels.forEach((entry) => { entry.zoom = change.zoom; });
+        if (this.viewerState.links.zoom) {
+          this.viewerState.sharedZoom = change.zoom;
+          this.viewerState.panels.forEach((entry) => { entry.zoom = change.zoom; });
         }
       } else if (change.type === "reset-view") {
         panel.zoom = DEFAULT_LOGICAL_ZOOM;
-        if (this.state.links.zoom) {
-          this.state.sharedZoom = DEFAULT_LOGICAL_ZOOM;
-          this.state.panels.forEach((entry) => { entry.zoom = DEFAULT_LOGICAL_ZOOM; });
+        if (this.viewerState.links.zoom) {
+          this.viewerState.sharedZoom = DEFAULT_LOGICAL_ZOOM;
+          this.viewerState.panels.forEach((entry) => { entry.zoom = DEFAULT_LOGICAL_ZOOM; });
         }
       }
       this.updateZoomLabel();
@@ -620,20 +620,20 @@ export function createTacticalViewerApplicationClass({
     }
 
     async setPanelCount(value) {
-      const panelCount = normalizePanelCount(Number(value), this.state.panelCount);
-      if (panelCount === this.state.panelCount) return panelCount;
-      this.state.panelCount = panelCount;
+      const panelCount = normalizePanelCount(Number(value), this.viewerState.panelCount);
+      if (panelCount === this.viewerState.panelCount) return panelCount;
+      this.viewerState.panelCount = panelCount;
       await this.persistLayout();
       if (this.attached && typeof this.render === "function") await this.render(true);
       return panelCount;
     }
 
     async setPanelView(index, view) {
-      if (!Number.isInteger(index) || index < 0 || index >= this.state.panels.length) {
+      if (!Number.isInteger(index) || index < 0 || index >= this.viewerState.panels.length) {
         return false;
       }
       if (!this.viewRegistry.has(view) || !isRenderableView(view)) return false;
-      this.state.panels[index].view = view;
+      this.viewerState.panels[index].view = view;
       await this.persistLayout();
       this.updatePanelControls(index);
       this.updateInteractionControls();
@@ -642,7 +642,7 @@ export function createTacticalViewerApplicationClass({
     }
 
     async setPanelOverlay(index, key, enabled) {
-      const panel = this.state.panels[index];
+      const panel = this.viewerState.panels[index];
       if (!panel || !Object.hasOwn(DEFAULT_OVERLAYS, key)) return false;
       panel.overlays[key] = enabled === true;
       await this.persistLayout();
@@ -652,21 +652,21 @@ export function createTacticalViewerApplicationClass({
 
     setPanelGridStyles() {
       if (!this.panelGridElement) return;
-      const areas = defaultPanelAreas(this.state.panelCount);
-      const columns = this.state.responsive?.columns ?? 2;
-      const [columnSplit, rowSplit] = this.state.splits;
+      const areas = defaultPanelAreas(this.viewerState.panelCount);
+      const columns = this.viewerState.responsive?.columns ?? 2;
+      const [columnSplit, rowSplit] = this.viewerState.splits;
       this.panelGridElement.style.setProperty?.(
         "--tactical-column-split", `${columnSplit * 100}%`
       );
       this.panelGridElement.style.setProperty?.(
         "--tactical-row-split", `${rowSplit * 100}%`
       );
-      this.panelGridElement.style.gridTemplateColumns = this.state.panelCount === 1 || columns === 1
+      this.panelGridElement.style.gridTemplateColumns = this.viewerState.panelCount === 1 || columns === 1
         ? "minmax(0, 1fr)"
         : "minmax(0, var(--tactical-column-split)) minmax(0, 1fr)";
-      this.panelGridElement.style.gridTemplateRows = columns === 1 && this.state.panelCount > 1
-        ? `repeat(${this.state.panelCount}, minmax(0, 1fr))`
-        : this.state.panelCount >= 3
+      this.panelGridElement.style.gridTemplateRows = columns === 1 && this.viewerState.panelCount > 1
+        ? `repeat(${this.viewerState.panelCount}, minmax(0, 1fr))`
+        : this.viewerState.panelCount >= 3
         ? "minmax(0, var(--tactical-row-split)) minmax(0, 1fr)"
         : "minmax(0, 1fr)";
       this.panelElements.forEach((panel, index) => {
@@ -682,14 +682,14 @@ export function createTacticalViewerApplicationClass({
       ].filter(Boolean);
       for (const splitter of splitters) {
         splitter.hidden = splitter.dataset.axis === "columns"
-          ? this.state.panelCount < 2 || columns < 2
-          : this.state.panelCount < 3 || columns < 2;
+          ? this.viewerState.panelCount < 2 || columns < 2
+          : this.viewerState.panelCount < 3 || columns < 2;
         splitter.setAttribute?.("aria-valuenow", String(
           splitter.dataset.axis === "columns" ? columnSplit : rowSplit
         ));
       }
       const rowSplitter = this.panelGridElement.querySelector?.('[data-role="splitter-rows"]');
-      if (rowSplitter) rowSplitter.style.left = this.state.panelCount === 3 && columns > 1
+      if (rowSplitter) rowSplitter.style.left = this.viewerState.panelCount === 3 && columns > 1
         ? `${columnSplit * 100}%`
         : "0";
     }
@@ -701,7 +701,7 @@ export function createTacticalViewerApplicationClass({
       const total = axis === "rows" ? Number(rect.height) : Number(rect.width);
       const minimum = axis === "rows" ? MIN_PANEL_HEIGHT : MIN_PANEL_WIDTH;
       const proportion = clampSplitterProportion(value, total, minimum);
-      this.state.splits[splitIndex] = proportion;
+      this.viewerState.splits[splitIndex] = proportion;
       this.setPanelGridStyles();
       this.persistLayout();
       this.requestRender({ type: "splitter-change", axis, proportion });
@@ -710,7 +710,7 @@ export function createTacticalViewerApplicationClass({
 
     updatePanelControls(index) {
       const panelElement = this.panelElements[index];
-      const panel = this.state.panels[index];
+      const panel = this.viewerState.panels[index];
       if (!panelElement || !panel) return;
       const select = panelElement.querySelector?.('[data-role="view-select"]');
       if (select) select.value = panel.view;
@@ -767,7 +767,7 @@ export function createTacticalViewerApplicationClass({
 
     updateInteractionControls(visibleTacticalStates = this.getVisibleTacticalStates()) {
       this.panelElements.forEach((panelElement, index) => {
-        const panel = this.state.panels[index];
+        const panel = this.viewerState.panels[index];
         if (!panel || !panelElement) return;
         const selected = visibleTacticalStates.find((state) =>
           state?.tokenId === this.getSelectedTokenId(index)
@@ -807,12 +807,12 @@ export function createTacticalViewerApplicationClass({
     }
 
     handleMovementPreview(preview) {
-      this.state.movementPreview = preview;
+      this.viewerState.movementPreview = preview;
       this.requestRender({ type: preview ? "movement-preview" : "movement-preview-cleared" });
     }
 
     handleActionResult(result) {
-      this.state.movementPreview = null;
+      this.viewerState.movementPreview = null;
       if (this.actionMessageElement) this.actionMessageElement.textContent = actionMessage(result);
       this.refreshFromDocuments({ render: false });
       this.requestRender({ type: "tactical-action-result", status: result?.status });
@@ -869,7 +869,7 @@ export function createTacticalViewerApplicationClass({
       if (!canvas || this.inputControllers[index]) return this.inputControllers[index];
       this.inputControllers[index] = new PanelInputController({
         element: canvas,
-        panel: this.state.panels[index],
+        panel: this.viewerState.panels[index],
         projectionEngine: this.projectionEngine,
         getRenderModel: () => this.buildRenderModel(undefined, index),
         scene: this.scene,
@@ -898,9 +898,9 @@ export function createTacticalViewerApplicationClass({
 
       const root = this.domDocument.createElement("div");
       addClass(root, "tactical-viewer-shell");
-      this.state.reducedMotion = this.reducedMotionOverride ?? reducedMotionPreference();
-      if (this.state.reducedMotion) addClass(root, "tactical-viewer-reduced-motion");
-      root.dataset.reducedMotion = String(this.state.reducedMotion);
+      this.viewerState.reducedMotion = this.reducedMotionOverride ?? reducedMotionPreference();
+      if (this.viewerState.reducedMotion) addClass(root, "tactical-viewer-reduced-motion");
+      root.dataset.reducedMotion = String(this.viewerState.reducedMotion);
 
       const toolbar = this.domDocument.createElement("div");
       addClass(toolbar, "tactical-viewer-shared-toolbar");
@@ -918,7 +918,7 @@ export function createTacticalViewerApplicationClass({
         option.textContent = String(count);
         panelCountSelect.appendChild(option);
       }
-      panelCountSelect.value = String(this.state.panelCount);
+      panelCountSelect.value = String(this.viewerState.panelCount);
       panelCountSelect.addEventListener?.("change", () => this.setPanelCount(panelCountSelect.value));
       toolbar.append(panelCountLabel, panelCountSelect);
 
@@ -930,7 +930,7 @@ export function createTacticalViewerApplicationClass({
         const label = this.domDocument.createElement("label");
         const checkbox = this.domDocument.createElement("input");
         checkbox.type = "checkbox";
-        checkbox.checked = this.state.links[key] === true;
+        checkbox.checked = this.viewerState.links[key] === true;
         checkbox.setAttribute?.("aria-label", labelText);
         setRole(checkbox, `link-${key}`);
         checkbox.addEventListener?.("change", () => this.setLink(key, checkbox.checked));
@@ -946,7 +946,7 @@ export function createTacticalViewerApplicationClass({
 
       this.panelElements = [];
       this.canvases = [];
-      for (let index = 0; index < this.state.panelCount; index += 1) {
+      for (let index = 0; index < this.viewerState.panelCount; index += 1) {
         const panel = this.domDocument.createElement("section");
         addClass(panel, "tactical-viewer-panel");
         setRole(panel, "panel");
@@ -968,13 +968,13 @@ export function createTacticalViewerApplicationClass({
           option.textContent = viewLabel(view.id, view.name);
           viewSelect.appendChild(option);
         }
-        viewSelect.value = this.state.panels[index].view;
+        viewSelect.value = this.viewerState.panels[index].view;
         viewSelect.addEventListener?.("change", () => this.setPanelView(index, viewSelect.value));
 
         const zoomOut = makeButton(this.domDocument, "−", "zoom-out", localize("viewer.zoomOut", "Zoom out"));
         const zoomLabel = this.domDocument.createElement("span");
-        zoomLabel.textContent = localizeFormat("viewer.zoomLabel", `${this.state.panels[index].zoom} px/cell`, {
-          zoom: this.state.panels[index].zoom
+        zoomLabel.textContent = localizeFormat("viewer.zoomLabel", `${this.viewerState.panels[index].zoom} px/cell`, {
+          zoom: this.viewerState.panels[index].zoom
         });
         setRole(zoomLabel, "zoom-label");
         const zoomIn = makeButton(this.domDocument, "+", "zoom-in", localize("viewer.zoomIn", "Zoom in"));
@@ -1019,7 +1019,7 @@ export function createTacticalViewerApplicationClass({
           const label = this.domDocument.createElement("label");
           const checkbox = this.domDocument.createElement("input");
           checkbox.type = "checkbox";
-          checkbox.checked = this.state.panels[index].overlays[key] === true;
+          checkbox.checked = this.viewerState.panels[index].overlays[key] === true;
           setRole(checkbox, `overlay-${key}`);
           checkbox.setAttribute?.("aria-label", `${localize("viewer.overlay." + key, key)} (${index + 1})`);
           checkbox.addEventListener?.("change", () => this.setPanelOverlay(index, key, checkbox.checked));
@@ -1206,8 +1206,8 @@ export function createTacticalViewerApplicationClass({
     updateViewport(rect = this.panelElements[0]?.getBoundingClientRect?.(), index = 0) {
       const width = Math.max(0, Number(rect?.width) || 0);
       const height = Math.max(0, Number(rect?.height) || 0);
-      if (!this.state.panels[index]) return this.getViewportDimensions();
-      this.state.panels[index].dimensions = { width, height };
+      if (!this.viewerState.panels[index]) return this.getViewportDimensions();
+      this.viewerState.panels[index].dimensions = { width, height };
       if (index === 0) this.viewport = { width, height };
       if (index === 0) this.updateResponsiveState(width);
       const canvas = this.canvases[index];
@@ -1224,22 +1224,22 @@ export function createTacticalViewerApplicationClass({
     }
 
     updateResponsiveState(width) {
-      this.state.responsive = getPanelLayoutState(this.state.panelCount, width);
+      this.viewerState.responsive = getPanelLayoutState(this.viewerState.panelCount, width);
       if (this.responsiveWarning) {
-        this.responsiveWarning.textContent = this.state.responsive.warning
+        this.responsiveWarning.textContent = this.viewerState.responsive.warning
           ? localizeFormat(
             "viewer.responsiveWarning",
-            this.state.responsive.warning,
+            this.viewerState.responsive.warning,
             {
-              count: this.state.responsive.panelCount,
-              recommended: this.state.responsive.recommendedPanelCount
+              count: this.viewerState.responsive.panelCount,
+              recommended: this.viewerState.responsive.recommendedPanelCount
             }
           )
           : "";
-        this.responsiveWarning.hidden = this.state.responsive.warning === "";
+        this.responsiveWarning.hidden = this.viewerState.responsive.warning === "";
       }
       this.setPanelGridStyles();
-      return this.state.responsive;
+      return this.viewerState.responsive;
     }
 
     requestRender(invalidation = undefined) {
@@ -1261,7 +1261,7 @@ export function createTacticalViewerApplicationClass({
     renderViewport() {
       const visibleTacticalStates = this.refreshFromDocuments({ render: false });
       this.updateSelectedTokenReadout(visibleTacticalStates);
-      for (let panelIndex = 0; panelIndex < this.state.panelCount; panelIndex += 1) {
+      for (let panelIndex = 0; panelIndex < this.viewerState.panelCount; panelIndex += 1) {
         const canvas = this.canvases[panelIndex];
         if (!canvas) continue;
         const context = canvas.getContext?.("2d");
@@ -1270,9 +1270,9 @@ export function createTacticalViewerApplicationClass({
           canvas,
           context,
           scene: this.scene,
-          viewport: this.state.panels[panelIndex].dimensions,
+          viewport: this.viewerState.panels[panelIndex].dimensions,
           panel: this.getPanelRenderState(panelIndex),
-          state: this.state,
+          state: this.viewerState,
           panelIndex,
           selectedTokenId: this.getSelectedTokenId(panelIndex),
           devicePixelRatio: this.devicePixelRatio,

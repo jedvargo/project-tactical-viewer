@@ -9,6 +9,10 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function normalizeEnabled(value) {
+  return value === true || value === "true";
+}
+
 function cloneValue(value) {
   if (Array.isArray(value)) return value.map(cloneValue);
   if (isRecord(value)) {
@@ -20,13 +24,13 @@ function cloneValue(value) {
 /** Normalize every Scene flag shape written during development to v2. */
 export function migrateSceneFlags(value) {
   const source = isRecord(value) ? value : {};
-  const legacyEnabled = typeof value === "boolean" ? value : false;
+  const legacyEnabled = normalizeEnabled(value);
   const migrated = {
     ...Object.fromEntries(Object.entries(source)
       .filter(([key]) => ![SCENE_SCHEMA_VERSION_FLAG, SCENE_ENABLED_FLAG].includes(key))
       .map(([key, child]) => [key, cloneValue(child)])),
     schemaVersion: CURRENT_SCHEMA_VERSION,
-    enabled: typeof source.enabled === "boolean" ? source.enabled : legacyEnabled
+    enabled: normalizeEnabled(source.enabled) || legacyEnabled
   };
   return Object.freeze(migrated);
 }

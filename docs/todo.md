@@ -348,6 +348,13 @@ A prompt may be marked complete only after its focused tests, full automated sui
 
 ---
 
+## Confirmed Foundry v14 integration repairs
+
+- [x] Scene enablement uses the typed Boolean form input and normalizes legacy string values for reading.
+- [x] Tactical Viewer module state uses `viewerState` without assigning to `ApplicationV2.state`.
+- [x] Regression coverage and the full automated suite pass.
+- [!] Real Foundry v14 smoke verification remains blocked by the unavailable Foundry executable/test World noted above.
+
 ## Deferred post-v1 work — do not implement in prompts 00–30
 
 - [ ] Isometric direct movement.

@@ -147,12 +147,12 @@ async function linkedApplication({ panelViews = ["top", "north", "east"], links 
     devicePixelRatio: 1
   });
   await application.render(true);
-  application.state.panels.forEach((panel) => {
+  application.viewerState.panels.forEach((panel) => {
     panel.focus = { x: 5, y: 5, z: 7 };
     panel.zoom = 50;
   });
-  application.state.sharedFocus = { x: 5, y: 5, z: 7 };
-  application.state.sharedZoom = 50;
+  application.viewerState.sharedFocus = { x: 5, y: 5, z: 7 };
+  application.viewerState.sharedZoom = 50;
   return { application, frame, document };
 }
 
@@ -166,14 +166,14 @@ describe("Prompt 20 linked viewer state", () => {
     const { application } = await linkedApplication();
 
     application.handleSelectionChanged("ship", 1);
-    expect(application.state.panels.slice(0, 3).map(({ selectedTokenId }) => selectedTokenId))
+    expect(application.viewerState.panels.slice(0, 3).map(({ selectedTokenId }) => selectedTokenId))
       .toEqual(["ship", "ship", "ship"]);
 
     await application.setLinkSelection(false);
     application.handleSelectionChanged("scout", 1);
-    expect(application.state.panels.slice(0, 3).map(({ selectedTokenId }) => selectedTokenId))
+    expect(application.viewerState.panels.slice(0, 3).map(({ selectedTokenId }) => selectedTokenId))
       .toEqual(["ship", "scout", "ship"]);
-    expect(application.state.selectedTokenId).toBe("ship");
+    expect(application.viewerState.selectedTokenId).toBe("ship");
   });
 
   it.each([
@@ -187,9 +187,9 @@ describe("Prompt 20 linked viewer state", () => {
 
     pan(application, 0, { x: 50, y: 20 });
 
-    expect(application.state.sharedFocus).toEqual(expected);
-    expect(application.state.panels[0].focus).toEqual(expected);
-    expect(application.state.panels[1].focus).toEqual(expected);
+    expect(application.viewerState.sharedFocus).toEqual(expected);
+    expect(application.viewerState.panels[0].focus).toEqual(expected);
+    expect(application.viewerState.panels[1].focus).toEqual(expected);
   });
 
   it("keeps focus independent when Link Center is disabled", async () => {
@@ -197,20 +197,20 @@ describe("Prompt 20 linked viewer state", () => {
 
     pan(application, 0, { x: 50, y: 20 });
 
-    expect(application.state.panels[0].focus).toEqual({ x: 4, y: 5.4, z: 7 });
-    expect(application.state.panels[1].focus).toEqual({ x: 5, y: 5, z: 7 });
-    expect(application.state.sharedFocus).toEqual({ x: 5, y: 5, z: 7 });
+    expect(application.viewerState.panels[0].focus).toEqual({ x: 4, y: 5.4, z: 7 });
+    expect(application.viewerState.panels[1].focus).toEqual({ x: 5, y: 5, z: 7 });
+    expect(application.viewerState.sharedFocus).toEqual({ x: 5, y: 5, z: 7 });
   });
 
   it("links logical pixels-per-cell zoom and keeps unlinked panel zoom independent", async () => {
     const { application } = await linkedApplication();
 
     application.inputControllers[0].setZoom(100);
-    expect(application.state.panels.slice(0, 3).map(({ zoom }) => zoom)).toEqual([100, 100, 100]);
+    expect(application.viewerState.panels.slice(0, 3).map(({ zoom }) => zoom)).toEqual([100, 100, 100]);
 
     await application.setLinkZoom(false);
     application.inputControllers[1].setZoom(200);
-    expect(application.state.panels.slice(0, 3).map(({ zoom }) => zoom)).toEqual([100, 200, 100]);
+    expect(application.viewerState.panels.slice(0, 3).map(({ zoom }) => zoom)).toEqual([100, 200, 100]);
   });
 
   it("links isometric screen-space center and logical zoom without changing 3D focus", async () => {
@@ -219,12 +219,12 @@ describe("Prompt 20 linked viewer state", () => {
     pan(application, 0, { x: 30, y: -15 });
     application.inputControllers[0].setZoom(120);
 
-    expect(application.state.sharedPan).toEqual({ x: 30, y: -15 });
-    expect(application.state.panels.slice(0, 2).map(({ pan }) => pan)).toEqual([
+    expect(application.viewerState.sharedPan).toEqual({ x: 30, y: -15 });
+    expect(application.viewerState.panels.slice(0, 2).map(({ pan }) => pan)).toEqual([
       { x: 30, y: -15 }, { x: 30, y: -15 }
     ]);
-    expect(application.state.panels.slice(0, 2).map(({ zoom }) => zoom)).toEqual([120, 120]);
-    expect(application.state.sharedFocus).toEqual({ x: 5, y: 5, z: 7 });
+    expect(application.viewerState.panels.slice(0, 2).map(({ zoom }) => zoom)).toEqual([120, 120]);
+    expect(application.viewerState.sharedFocus).toEqual({ x: 5, y: 5, z: 7 });
   });
 
   it("persists the three link toggles without persisting transient focus or zoom", async () => {

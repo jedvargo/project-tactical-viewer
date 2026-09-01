@@ -119,6 +119,53 @@ describe("configuration UI hook integration", () => {
       .toContain("gridless");
   });
 
+  it("renders Scene enablement through Foundry's typed Boolean input helper", async () => {
+    const hooks = createFakeFoundryHooks();
+    const document = documentFactory();
+    const booleanInput = vi.fn(({ name, value, disabled }) => {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.setAttribute("name", name);
+      input.checked = value;
+      input.disabled = disabled;
+      return input;
+    });
+    vi.stubGlobal("foundry", { applications: { fields: { createCheckboxInput: booleanInput } } });
+
+    const runtime = createRuntime({ hooks });
+    runtime.initialize();
+    let enabled = false;
+    const scene = {
+      documentName: "Scene",
+      grid: { type: "square", size: 100, distance: 5 },
+      dimensions: { width: 1000, height: 800 },
+      flags: { "tactical-3d-viewer": { enabled }, other: { preserved: true } },
+      getFlag: vi.fn((_scope, key) => key === "enabled" ? enabled : 2),
+      setFlag: vi.fn(async (_scope, key, value) => {
+        if (key === "enabled") {
+          enabled = value;
+          scene.flags["tactical-3d-viewer"].enabled = value;
+        }
+        return value;
+      })
+    };
+    await runtime.setSceneEnabled(scene, true);
+    const root = formRoot(document);
+    hooks.fire("renderApplicationV2", {
+      constructor: { name: "SceneConfig" },
+      document: scene
+    }, root, {}, {});
+
+    const control = root.querySelector('[name="flags.tactical-3d-viewer.enabled"]');
+    expect(booleanInput).toHaveBeenCalledWith(expect.objectContaining({
+      name: "flags.tactical-3d-viewer.enabled",
+      value: true
+    }));
+    expect(control.checked).toBe(true);
+    expect(control.disabled).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
   it("registers the configuration hook once and invalidates runtime state on flag updates", () => {
     const hooks = createFakeFoundryHooks();
     const frames = [];

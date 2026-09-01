@@ -95,8 +95,13 @@ class FakeApplicationV2 {
 
   constructor(options = {}) {
     this.options = options;
+    this._applicationState = Object.freeze({ inherited: true });
     this.element = null;
     this.rendered = false;
+  }
+
+  get state() {
+    return this._applicationState;
   }
 
   async render() {
@@ -180,9 +185,9 @@ describe("TacticalViewerApplication", () => {
       devicePixelRatio: 1
     });
 
-    expect(application.state.panelCount).toBe(4);
-    expect(application.state.panels).toHaveLength(4);
-    expect(application.state.panels[0].view).toBe("north");
+    expect(application.viewerState.panelCount).toBe(4);
+    expect(application.viewerState.panels).toHaveLength(4);
+    expect(application.viewerState.panels[0].view).toBe("north");
     expect(persistenceService.getSceneLayout).toHaveBeenCalledWith("scene-1");
 
     await application.render(true);
@@ -223,7 +228,7 @@ describe("TacticalViewerApplication", () => {
     await application.setPanelCount(2);
 
     expect(application.panelCount).toBe(2);
-    expect(application.state.panels.map(({ view }) => view)).toEqual([
+    expect(application.viewerState.panels.map(({ view }) => view)).toEqual([
       "top", "top", "south", "west"
     ]);
     expect(application.element.querySelectorAll("canvas")).toHaveLength(2);
@@ -359,7 +364,7 @@ describe("TacticalViewerApplication", () => {
         "iso-ne", "iso-se", "iso-sw", "iso-nw"
       ]);
     }
-    expect(application.state.panels.map(({ view }) => view)).toEqual([
+    expect(application.viewerState.panels.map(({ view }) => view)).toEqual([
       "iso-ne", "iso-se", "iso-sw", "iso-nw"
     ]);
   });
@@ -535,15 +540,15 @@ describe("TacticalViewerApplication", () => {
       preventDefault: vi.fn()
     });
 
-    expect(application.state.selectedTokenId).toBe("visible");
+    expect(application.viewerState.selectedTokenId).toBe("visible");
     expect(readout.textContent).toContain("Selected Aurora");
-    expect(application.state.panels[0].zoom).toBe(64);
+    expect(application.viewerState.panels[0].zoom).toBe(64);
 
     application.element.querySelector('[data-role="zoom-in"]').dispatchEvent({ type: "click" });
-    expect(application.state.panels[0].zoom).toBe(80);
+    expect(application.viewerState.panels[0].zoom).toBe(80);
     application.element.querySelector('[data-role="reset-view"]').dispatchEvent({ type: "click" });
-    expect(application.state.panels[0].zoom).toBe(64);
-    expect(application.state.panels[0].focus).toBeNull();
+    expect(application.viewerState.panels[0].zoom).toBe(64);
+    expect(application.viewerState.panels[0].focus).toBeNull();
   });
 
   it("exposes Top heading +/-45 controls and commits through the update service", async () => {
@@ -614,7 +619,7 @@ describe("TacticalViewerApplication", () => {
 
     await application.render(true);
     scheduler.flush();
-    application.state.selectedTokenId = "ship";
+    application.viewerState.selectedTokenId = "ship";
     application.updateInteractionControls();
 
     expect(application.element.querySelector('[data-role="heading-decrease"]')).not.toBeNull();
@@ -688,7 +693,7 @@ describe("TacticalViewerApplication", () => {
 
     await application.render(true);
     scheduler.flush();
-    application.state.selectedTokenId = "ship";
+    application.viewerState.selectedTokenId = "ship";
     application.updateInteractionControls();
 
     const pitchSelect = application.element.querySelector('[data-role="pitch-select"]');
@@ -776,7 +781,7 @@ describe("TacticalViewerApplication", () => {
       .toBe(true);
 
     application.updateViewport({ width: 320, height: 360 }, 0);
-    expect(application.state.responsive).toMatchObject({ narrow: true, columns: 1 });
+    expect(application.viewerState.responsive).toMatchObject({ narrow: true, columns: 1 });
     expect(application.element.querySelector('[data-role="responsive-warning"]').hidden).toBe(false);
   });
 
@@ -801,7 +806,7 @@ describe("TacticalViewerApplication", () => {
     });
 
     await application.render(true);
-    application.state.selectedTokenId = "secret";
+    application.viewerState.selectedTokenId = "secret";
     application.updateSelectedTokenReadout();
 
     expect(application.element.querySelector('[data-role="selected-token-readout"]').textContent)
@@ -839,10 +844,10 @@ describe("TacticalViewerApplication", () => {
     });
 
     await application.render(true);
-    application.state.selectedTokenId = "ship";
+    application.viewerState.selectedTokenId = "ship";
     currentStates = [];
     expect(application.refreshFromDocuments()).toEqual([]);
-    expect(application.state.selectedTokenId).toBeNull();
+    expect(application.viewerState.selectedTokenId).toBeNull();
 
     await application.close();
     expect(saveSceneLayout).toHaveBeenLastCalledWith("scene-1", expect.objectContaining({

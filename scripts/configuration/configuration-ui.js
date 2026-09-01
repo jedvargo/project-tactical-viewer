@@ -58,6 +58,17 @@ function inputFor(document, type, name, value, extra = {}) {
   return create(document, "input", { type, name, value, ...extra });
 }
 
+function booleanInputFor(document, name, value, extra = {}) {
+  const createCheckboxInput = globalThis?.foundry?.applications?.fields?.createCheckboxInput;
+  if (typeof createCheckboxInput === "function") {
+    return createCheckboxInput({ name, value: value === true, ...extra });
+  }
+  return inputFor(document, "checkbox", name, "true", {
+    ...extra,
+    checked: value === true
+  });
+}
+
 function namedValue(root, name) {
   return root?.querySelector?.(`[name="${name}"]`);
 }
@@ -66,8 +77,7 @@ function appendSceneConfiguration({ document, form, scene, sceneEligibility }) {
   const result = sceneEligibility.evaluate(scene);
   const section = create(document, "fieldset", { "data-role": "tactical-scene-config" });
   section.appendChild(create(document, "legend", {}, localize("configuration.title", "3D Tactical Viewer")));
-  const enabled = inputFor(document, "checkbox", "flags.tactical-3d-viewer.enabled", "true", {
-    checked: getSceneEnabled(scene),
+  const enabled = booleanInputFor(document, "flags.tactical-3d-viewer.enabled", getSceneEnabled(scene), {
     disabled: !result.eligible
   });
   appendField(document, section, localize(
