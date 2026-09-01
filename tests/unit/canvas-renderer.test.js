@@ -119,6 +119,27 @@ describe("Canvas2DRendererV1", () => {
     expect(model.tokens[0].point).toEqual({ x: 350, y: 150 });
   });
 
+  it("renders a local XY preview at the candidate anchor while preserving Z", () => {
+    const { model } = renderInput([state({ tacticalZ: 7 })], {
+      movementPreview: {
+        tokenId: "token-1",
+        tacticalX: 3.5,
+        tacticalY: 2.5,
+        tacticalZ: 7,
+        delta: { x: 1, y: 1 },
+        preview: true
+      }
+    });
+
+    expect(model.tokens[0]).toMatchObject({
+      point: { x: 350, y: 150 },
+      tacticalX: 3.5,
+      tacticalY: 2.5,
+      tacticalZ: 7,
+      preview: true
+    });
+  });
+
   it("does not update a document while rendering", () => {
     const tokenDocument = { update: vi.fn() };
     renderInput([state({ document: tokenDocument })]);

@@ -374,4 +374,88 @@ describe("TacticalViewerApplication", () => {
     expect(application.state.panels[0].zoom).toBe(64);
     expect(application.state.panels[0].focus).toBeNull();
   });
+
+  it("exposes Top heading +/-45 controls and commits through the update service", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const tokenDocument = {
+      id: "ship",
+      x: 0,
+      y: 0,
+      elevation: 15,
+      rotation: 180,
+      flags: { "tactical-3d-viewer": { pitch: 0 } }
+    };
+    const tacticalUpdateService = {
+      captureInteractionSnapshot: vi.fn(() => ({
+        x: 0, y: 0, elevation: 15, rotation: 180, pitch: 0
+      })),
+      setHeading: vi.fn(async () => ({ status: "accepted", ok: true }))
+    };
+    const renderer = {
+      buildModel: vi.fn(() => ({
+        view: "top",
+        camera: {
+          view: "top",
+          focus: { x: 0.5, y: 0.5, z: 3 },
+          scale: 64,
+          screenCenter: { x: 200, y: 150 }
+        },
+        tokens: [{
+          tokenId: "ship",
+          point: { x: 200, y: 150 },
+          markerRadius: 20,
+          visibleToCurrentUser: true,
+          canCurrentUserMove: true,
+          canCurrentUserRotate: true,
+          participating: true
+        }]
+      })),
+      render: vi.fn()
+    };
+    const tacticalStateService = {
+      getVisibleTacticalStates: vi.fn(() => [{
+        tokenId: "ship",
+        name: "Aurora",
+        tacticalX: 0.5,
+        tacticalY: 0.5,
+        tacticalZ: 3,
+        heading: 0,
+        pitch: 0,
+        visibleToCurrentUser: true,
+        participating: true,
+        canCurrentUserMove: true,
+        canCurrentUserRotate: true
+      }])
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: { ...createScene(), tokens: [tokenDocument] },
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      tacticalStateService,
+      tacticalUpdateService,
+      renderer,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    scheduler.flush();
+    application.state.selectedTokenId = "ship";
+    application.updateInteractionControls();
+
+    expect(application.element.querySelector('[data-role="heading-decrease"]')).not.toBeNull();
+    expect(application.element.querySelector('[data-role="heading-increase"]')).not.toBeNull();
+    await application.setHeadingBy(45);
+
+    expect(tacticalUpdateService.captureInteractionSnapshot).toHaveBeenCalledOnce();
+    expect(tacticalUpdateService.setHeading).toHaveBeenCalledWith(
+      tokenDocument,
+      45,
+      expect.any(Object)
+    );
+    expect(tacticalUpdateService.setHeading).toHaveBeenCalledOnce();
+  });
 });

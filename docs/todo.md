@@ -174,14 +174,15 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: no installed or linked Foundry VTT v14 executable/test World was available; automated controller and ApplicationV2-shaped coverage passed.
 
 ### P16 — Top movement + heading
-- [ ] Local movement preview.
-- [ ] Top drag changes X/Y only.
-- [ ] Commit through TacticalUpdateService.
-- [ ] Conflict cancellation.
-- [ ] 45-degree heading editor.
-- [ ] Respect movement/rotation locks.
-- [ ] External native move/rotation redraw.
-- [ ] Real Foundry XY edit smoke test.
+- [x] Local movement preview.
+- [x] Top drag changes X/Y only.
+- [x] Commit through TacticalUpdateService.
+- [x] Conflict cancellation.
+- [x] 45-degree heading editor.
+- [x] Respect movement/rotation locks.
+- [x] External native move/rotation redraw.
+- [!] Real Foundry XY edit smoke test.
+  - Blocked: no Foundry VTT v14 executable or test World is available in this workspace; automated Foundry-shaped movement, heading, permission, conflict, and redraw coverage passed.
 
 ### P17 — North X/Z movement + pitch
 - [ ] North renderer using shared renderer/projection engine.

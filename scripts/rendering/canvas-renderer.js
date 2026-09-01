@@ -111,6 +111,11 @@ function visibleToken(state, projectionEngine, camera, viewport) {
     height: state.height,
     heading: state.heading,
     pitch: state.pitch,
+    canCurrentUserMove: state.canCurrentUserMove === true,
+    canCurrentUserRotate: state.canCurrentUserRotate === true,
+    locked: state.locked === true,
+    lockRotation: state.lockRotation === true,
+    preview: state.preview === true,
     offGrid: state.offGrid === true,
     point,
     orientation,
@@ -132,13 +137,17 @@ export function createTopRenderModel({
   zoom,
   focus,
   overlays = {},
-  selectedTokenId = null
+  selectedTokenId = null,
+  movementPreview = null
 } = {}) {
   const gridGeometry = coordinateAdapter.getTopGrid(scene);
   const camera = cameraForTop({ grid: gridGeometry, viewport, zoom, focus });
   const grid = projectedGrid({ grid: gridGeometry, camera, projectionEngine });
   const tokens = Object.freeze(
     (Array.isArray(tacticalStates) ? tacticalStates : [])
+      .map((state) => movementPreview?.tokenId === state?.tokenId
+        ? { ...state, ...movementPreview, preview: true }
+        : state)
       .map((state) => visibleToken(state, projectionEngine, camera, viewport))
       .filter(Boolean)
       .map((state) => Object.freeze({
@@ -152,6 +161,7 @@ export function createTopRenderModel({
     camera: Object.freeze(camera),
     grid,
     tokens,
+    movementPreview,
     selectedTokenId,
     overlays: Object.freeze({
       grid: overlays.grid !== false,
@@ -219,7 +229,8 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       zoom: panel.zoom,
       focus: panel.focus,
       overlays: panel.overlays,
-      selectedTokenId: input?.state?.selectedTokenId
+      selectedTokenId: input?.state?.selectedTokenId,
+      movementPreview: input?.state?.movementPreview
     });
   }
 
@@ -290,6 +301,15 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       context.fill?.();
       context.strokeStyle = this.colors.tokenStroke ?? DEFAULT_TOKEN_STROKE;
       context.stroke?.();
+
+      if (token.preview) {
+        context.beginPath?.();
+        context.strokeStyle = this.colors.preview ?? "#8bd8ff";
+        context.setLineDash?.([6, 4]);
+        context.arc?.(point.x, point.y, markerRadius + 6, 0, Math.PI * 2);
+        context.stroke?.();
+        context.setLineDash?.([]);
+      }
 
       if (token.selected) {
         context.beginPath?.();

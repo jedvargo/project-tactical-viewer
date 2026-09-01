@@ -53,6 +53,7 @@ function makeState(scene, persistenceService, registry) {
   const layout = layoutFor(scene, persistenceService);
   return {
     selectedTokenId: null,
+    movementPreview: null,
     panelCount: 1,
     links: {
       selection: layout.links?.selection ?? true,
@@ -68,6 +69,23 @@ function makeState(scene, persistenceService, registry) {
       overlays: { ...(layout.panels?.[0]?.overlays ?? {}) }
     }]
   };
+}
+
+function sceneTokenById(scene, tokenId) {
+  const tokens = scene?.tokens;
+  if (typeof tokens?.get === "function") return tokens.get(tokenId);
+  if (Array.isArray(tokens)) return tokens.find((token) => (token?.id ?? token?._id) === tokenId);
+  if (tokens && typeof tokens === "object") return tokens[tokenId];
+  return null;
+}
+
+function actionMessage(result) {
+  if (result?.status === "conflict") return "Token changed remotely; movement canceled.";
+  if (result?.reason === "rotation-locked") return "Token rotation is locked.";
+  if (result?.reason === "locked") return "Token movement is locked.";
+  if (result?.reason === "permission") return "You cannot update this token.";
+  if (result?.status === "rejected") return "Token update was rejected.";
+  return "";
 }
 
 function addClass(element, className) {
@@ -111,6 +129,8 @@ export function createTacticalViewerApplicationClass({
         persistenceService,
         synchronizationCoordinator,
         tacticalStateService,
+        tacticalUpdateService,
+        coordinateAdapter,
         viewRegistry = VIEW_REGISTRY,
         scheduler = defaultFrameScheduler,
         cancelScheduler = defaultFrameCanceller,
@@ -130,6 +150,8 @@ export function createTacticalViewerApplicationClass({
       this.persistenceService = persistenceService;
       this.synchronizationCoordinator = synchronizationCoordinator;
       this.tacticalStateService = tacticalStateService;
+      this.tacticalUpdateService = tacticalUpdateService;
+      this.coordinateAdapter = coordinateAdapter ?? tacticalUpdateService?.coordinateAdapter;
       this.viewRegistry = viewRegistry;
       this.domDocument = document ?? documentFor({ document });
       this.scheduler = scheduler;
@@ -151,6 +173,7 @@ export function createTacticalViewerApplicationClass({
       this.panelElement = undefined;
       this.zoomLabel = undefined;
       this.selectedTokenReadout = undefined;
+      this.actionMessageElement = undefined;
       this.inputController = undefined;
       this.attached = false;
     }
@@ -208,6 +231,56 @@ export function createTacticalViewerApplicationClass({
     handleSelectionChanged(tokenId) {
       this.state.selectedTokenId = tokenId;
       this.updateSelectedTokenReadout();
+      this.updateInteractionControls();
+    }
+
+    getSelectedTacticalState() {
+      return this.getVisibleTacticalStates().find((state) =>
+        state?.tokenId === this.state.selectedTokenId
+      );
+    }
+
+    getTokenById(tokenId) {
+      return sceneTokenById(this.scene, tokenId);
+    }
+
+    updateInteractionControls(visibleTacticalStates = this.getVisibleTacticalStates()) {
+      const selected = visibleTacticalStates.find((state) =>
+        state?.tokenId === this.state.selectedTokenId
+      );
+      const disabled = this.state.panels[0]?.view !== "top"
+        || selected?.canCurrentUserRotate !== true;
+      for (const role of ["heading-decrease", "heading-increase"]) {
+        const control = this.element?.querySelector?.(`[data-role="${role}"]`);
+        if (control) control.disabled = disabled;
+      }
+    }
+
+    handleMovementPreview(preview) {
+      this.state.movementPreview = preview;
+      this.requestRender({ type: preview ? "movement-preview" : "movement-preview-cleared" });
+    }
+
+    handleActionResult(result) {
+      this.state.movementPreview = null;
+      if (this.actionMessageElement) this.actionMessageElement.textContent = actionMessage(result);
+      this.requestRender({ type: "tactical-action-result", status: result?.status });
+    }
+
+    async setHeadingBy(delta) {
+      const selected = this.getSelectedTacticalState();
+      const document = selected ? this.getTokenById(selected.tokenId) : null;
+      if (!selected || !document || typeof this.tacticalUpdateService?.setHeading !== "function") {
+        return null;
+      }
+      const snapshot = this.tacticalUpdateService.captureInteractionSnapshot(document);
+      const result = await this.tacticalUpdateService.setHeading(
+        document,
+        selected.heading + delta,
+        snapshot
+      );
+      this.handleActionResult(result);
+      return result;
     }
 
     createInputController() {
@@ -217,8 +290,14 @@ export function createTacticalViewerApplicationClass({
         panel: this.state.panels[0],
         projectionEngine: this.projectionEngine,
         getRenderModel: () => this.buildRenderModel(),
+        scene: this.scene,
+        coordinateAdapter: this.coordinateAdapter,
+        tacticalUpdateService: this.tacticalUpdateService,
+        getTokenById: (tokenId) => this.getTokenById(tokenId),
         onSelectionChanged: (tokenId) => this.handleSelectionChanged(tokenId),
         onViewChanged: () => this.updateZoomLabel(),
+        onMovementPreview: (preview) => this.handleMovementPreview(preview),
+        onActionResult: (result) => this.handleActionResult(result),
         requestRender: (invalidation) => this.requestRender(invalidation)
       });
       return this.inputController;
@@ -251,6 +330,7 @@ export function createTacticalViewerApplicationClass({
       viewSelect.addEventListener?.("change", () => {
         if (this.viewRegistry.has(viewSelect.value)) {
           this.state.panels[0].view = viewSelect.value;
+          this.updateInteractionControls();
           this.requestRender({ type: "view-change" });
         }
       });
@@ -261,8 +341,19 @@ export function createTacticalViewerApplicationClass({
       setRole(zoomLabel, "zoom-label");
       const zoomIn = makeButton(this.domDocument, "+", "zoom-in", "Zoom in");
       const resetView = makeButton(this.domDocument, "Reset", "reset-view", "Reset view");
+      const headingDecrease = makeButton(this.domDocument, "−45°", "heading-decrease", "Rotate heading left 45 degrees");
+      const headingIncrease = makeButton(this.domDocument, "+45°", "heading-increase", "Rotate heading right 45 degrees");
       const optionsButton = makeButton(this.domDocument, "Options", "panel-options", "Panel options");
-      toolbar.append(viewSelect, zoomOut, zoomLabel, zoomIn, resetView, optionsButton);
+      toolbar.append(
+        viewSelect,
+        zoomOut,
+        zoomLabel,
+        zoomIn,
+        resetView,
+        headingDecrease,
+        headingIncrease,
+        optionsButton
+      );
 
       const panel = this.domDocument.createElement("section");
       addClass(panel, "tactical-viewer-panel");
@@ -278,17 +369,26 @@ export function createTacticalViewerApplicationClass({
       selectedTokenReadout.setAttribute?.("aria-atomic", "true");
       setRole(selectedTokenReadout, "selected-token-readout");
       selectedTokenReadout.textContent = "No tactical token selected";
+      const actionMessage = this.domDocument.createElement("div");
+      addClass(actionMessage, "tactical-viewer-action-message");
+      actionMessage.setAttribute?.("aria-live", "polite");
+      setRole(actionMessage, "action-message");
       root.append(toolbar, panel);
       root.appendChild(selectedTokenReadout);
+      root.appendChild(actionMessage);
 
       this.canvas = canvas;
       this.panelElement = panel;
       this.zoomLabel = zoomLabel;
       this.selectedTokenReadout = selectedTokenReadout;
+      this.actionMessageElement = actionMessage;
       const controller = this.createInputController();
       zoomOut.addEventListener?.("click", () => controller?.zoomOut());
       zoomIn.addEventListener?.("click", () => controller?.zoomIn());
       resetView.addEventListener?.("click", () => controller?.resetView());
+      headingDecrease.addEventListener?.("click", () => this.setHeadingBy(-45));
+      headingIncrease.addEventListener?.("click", () => this.setHeadingBy(45));
+      this.updateInteractionControls();
       return root;
     }
 
@@ -307,6 +407,7 @@ export function createTacticalViewerApplicationClass({
       this.attached = true;
       this.updateZoomLabel();
       this.updateSelectedTokenReadout();
+      this.updateInteractionControls();
       this.updateViewport();
       this.requestRender({ type: "initial" });
     }

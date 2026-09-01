@@ -1,4 +1,5 @@
 import { ProjectionEngine } from "../projection/projection-engine.js";
+import { CoordinateAdapter } from "../model/coordinate-adapter.js";
 
 /** Logical zoom is deliberately independent of the canvas backing-store DPR. */
 export const MIN_LOGICAL_ZOOM = 16;
@@ -70,9 +71,15 @@ export class PanelInputController {
   constructor({
     element,
     panel,
+    scene,
+    coordinateAdapter = new CoordinateAdapter(),
+    tacticalUpdateService,
+    getTokenById,
     getRenderModel,
     onSelectionChanged,
     onViewChanged,
+    onMovementPreview,
+    onActionResult,
     requestRender,
     projectionEngine = new ProjectionEngine(),
     zoomStep = LOGICAL_ZOOM_STEP,
@@ -83,9 +90,15 @@ export class PanelInputController {
     }
     this.element = element;
     this.panel = panel;
+    this.scene = scene;
+    this.coordinateAdapter = coordinateAdapter;
+    this.tacticalUpdateService = tacticalUpdateService;
+    this.getTokenById = typeof getTokenById === "function" ? getTokenById : () => null;
     this.getRenderModel = typeof getRenderModel === "function" ? getRenderModel : () => null;
     this.onSelectionChanged = onSelectionChanged;
     this.onViewChanged = onViewChanged;
+    this.onMovementPreview = onMovementPreview;
+    this.onActionResult = onActionResult;
     this.requestRender = requestRender;
     this.projectionEngine = projectionEngine;
     this.zoomStep = zoomStep > 1 ? zoomStep : LOGICAL_ZOOM_STEP;
@@ -94,6 +107,12 @@ export class PanelInputController {
     this.pointerStart = undefined;
     this.pointerLast = undefined;
     this.pointerMoved = false;
+    this.dragToken = undefined;
+    this.dragDocument = undefined;
+    this.dragSnapshot = undefined;
+    this.dragStartTactical = undefined;
+    this.dragGrabOffset = undefined;
+    this.movementPreview = undefined;
     this.attached = false;
 
     this.handlePointerDown = this.handlePointerDown.bind(this);
@@ -169,14 +188,111 @@ export class PanelInputController {
     return token;
   }
 
+  startTokenDrag(local, token) {
+    if (this.currentCamera().view !== "top"
+      || token?.visibleToCurrentUser === false
+      || token?.canCurrentUserMove !== true) return false;
+    const document = this.getTokenById(token.tokenId);
+    if (!document || !this.scene
+      || typeof this.tacticalUpdateService?.captureInteractionSnapshot !== "function") {
+      return false;
+    }
+
+    const current = this.coordinateAdapter.toTactical(document, this.scene);
+    const pointerTactical = this.projectionEngine.inversePoint(local, this.currentCamera(), {
+      preserve: current.tacticalZ
+    });
+    this.dragToken = token;
+    this.dragDocument = document;
+    this.dragSnapshot = this.tacticalUpdateService.captureInteractionSnapshot(document);
+    this.dragStartTactical = current;
+    this.dragGrabOffset = {
+      x: pointerTactical.x - current.tacticalX,
+      y: pointerTactical.y - current.tacticalY
+    };
+    this.onSelectionChanged?.(token.tokenId, token);
+    return true;
+  }
+
+  setMovementPreview(preview) {
+    this.movementPreview = preview ?? undefined;
+    this.onMovementPreview?.(preview ?? null);
+    this.requestRender?.({ type: preview ? "movement-preview" : "movement-preview-cleared" });
+  }
+
+  previewTokenAt(local) {
+    if (!this.dragDocument || !this.dragStartTactical || !this.dragGrabOffset) return false;
+    const pointerTactical = this.projectionEngine.inversePoint(local, this.currentCamera(), {
+      preserve: this.dragStartTactical.tacticalZ
+    });
+    const snapped = this.coordinateAdapter.snapTacticalAnchor(
+      this.dragDocument,
+      this.scene,
+      {
+        x: pointerTactical.x - this.dragGrabOffset.x,
+        y: pointerTactical.y - this.dragGrabOffset.y
+      }
+    );
+    const delta = {
+      x: Math.round(snapped.tacticalX - this.dragStartTactical.tacticalX),
+      y: Math.round(snapped.tacticalY - this.dragStartTactical.tacticalY)
+    };
+    if (delta.x === 0 && delta.y === 0) {
+      this.setMovementPreview(null);
+      return true;
+    }
+    this.setMovementPreview({
+      tokenId: this.dragToken.tokenId,
+      tacticalX: this.dragStartTactical.tacticalX + delta.x,
+      tacticalY: this.dragStartTactical.tacticalY + delta.y,
+      tacticalZ: this.dragStartTactical.tacticalZ,
+      delta,
+      position: snapped.position,
+      preview: true
+    });
+    return true;
+  }
+
+  clearDragState() {
+    this.dragToken = undefined;
+    this.dragDocument = undefined;
+    this.dragSnapshot = undefined;
+    this.dragStartTactical = undefined;
+    this.dragGrabOffset = undefined;
+  }
+
+  async commitTokenDrag() {
+    const preview = this.movementPreview;
+    const document = this.dragDocument;
+    const snapshot = this.dragSnapshot;
+    const token = this.dragToken;
+    this.clearDragState();
+    if (!preview || !document || typeof this.tacticalUpdateService?.moveXY !== "function") {
+      this.setMovementPreview(null);
+      return null;
+    }
+
+    const result = await this.tacticalUpdateService.moveXY(
+      document,
+      this.scene,
+      preview.delta,
+      snapshot
+    );
+    this.setMovementPreview(null);
+    this.onActionResult?.(result, token);
+    return result;
+  }
+
   handlePointerDown(event) {
     if (event?.button !== undefined && event.button !== 0) return false;
     if (this.pointerId !== undefined) return false;
     const local = localPoint(this.element, event);
+    const token = this.projectedTokenAt(local);
     this.pointerId = event?.pointerId;
     this.pointerStart = local;
     this.pointerLast = local;
     this.pointerMoved = false;
+    this.startTokenDrag(local, token);
     this.element?.setPointerCapture?.(this.pointerId);
     event?.preventDefault?.();
     return true;
@@ -196,17 +312,25 @@ export class PanelInputController {
       y: local.y - this.pointerLast.y
     };
     this.pointerLast = local;
-    this.panBy(delta);
+    if (this.dragToken) this.previewTokenAt(local);
+    else this.panBy(delta);
     event?.preventDefault?.();
     return true;
   }
 
-  handlePointerUp(event) {
+  async handlePointerUp(event) {
     if (!samePointer(event, this.pointerId)) return false;
     const local = localPoint(this.element, event);
     const moved = this.pointerMoved;
+    const draggingToken = this.dragToken !== undefined;
     this.releasePointer();
-    if (!moved) this.selectAt(local);
+    if (draggingToken) {
+      if (moved) await this.commitTokenDrag();
+      else {
+        this.clearDragState();
+        this.setMovementPreview(null);
+      }
+    } else if (!moved) this.selectAt(local);
     event?.preventDefault?.();
     return true;
   }
@@ -214,6 +338,8 @@ export class PanelInputController {
   handlePointerCancel(event) {
     if (!samePointer(event, this.pointerId)) return false;
     this.cancelPointer();
+    this.clearDragState();
+    this.setMovementPreview(null);
     return true;
   }
 

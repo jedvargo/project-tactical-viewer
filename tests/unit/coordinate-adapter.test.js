@@ -213,6 +213,19 @@ describe("CoordinateAdapter", () => {
     expect(adapter.moveElevationByTacticalDelta(-7.5, 1, 5)).toBe(0);
   });
 
+  it("snaps a pointer-derived token top-left through Foundry's square-grid API", () => {
+    const grid = createFakeSquareGrid({ originX: 40, originY: 60 });
+    const scene = makeSquareScene(grid);
+    const token = makeToken({ x: 140, y: 160, width: 2, height: 2 });
+    const adapter = new CoordinateAdapter();
+
+    const snapped = adapter.snapTokenPosition(token, scene, { x: 241, y: 361 });
+
+    expect(snapped).toEqual({ x: 240, y: 360 });
+    expect(grid.calls.getSnappedPoint).toHaveLength(1);
+    expect(grid.calls.getSnappedPoint[0].behavior).toMatchObject({ mode: 256 });
+  });
+
   it("rejects non-positive grid distance for every elevation conversion", () => {
     const adapter = new CoordinateAdapter();
 

@@ -2,6 +2,7 @@ import { SceneEligibilityService } from "../scene-eligibility.js";
 import { ElevationAdapter } from "./elevation-adapter.js";
 
 const EPSILON = 1e-9;
+const DEFAULT_TOP_LEFT_SNAP_MODE = 256;
 
 function defaultGridProvider() {
   return globalThis.canvas?.grid;
@@ -285,6 +286,52 @@ export class CoordinateAdapter {
       grid.getTopLeftPoint(topLeftOffset)
     );
     return freezePoint(point.x, point.y);
+  }
+
+  /** Snap a candidate TokenDocument top-left through Foundry's public grid API. */
+  snapTokenPosition(token, scene, topLeftPoint, { grid: explicitGrid } = {}) {
+    const { grid } = this.context(scene, explicitGrid);
+    if (!finiteNumber(topLeftPoint?.x) || !finiteNumber(topLeftPoint?.y)) {
+      throw new TypeError("A finite token top-left point is required for snapping");
+    }
+    if (typeof grid.getSnappedPoint !== "function") {
+      throw new CoordinateAdapterError("The Foundry grid is missing public getSnappedPoint().");
+    }
+
+    const mode = globalThis.CONST?.GRID_SNAPPING_MODES?.TOP_LEFT_CORNER
+      ?? DEFAULT_TOP_LEFT_SNAP_MODE;
+    const snapped = grid.getSnappedPoint(
+      { x: topLeftPoint.x, y: topLeftPoint.y },
+      { mode }
+    );
+    const valid = pointFromGrid("getSnappedPoint", snapped);
+    return freezePoint(valid.x, valid.y);
+  }
+
+  /** Snap a pointer-derived tactical center while preserving token footprint anchoring. */
+  snapTacticalAnchor(token, scene, tacticalAnchor, { grid: explicitGrid } = {}) {
+    const { grid, sizeX, sizeY } = this.context(scene, explicitGrid);
+    const data = tokenData(token);
+    if (!finiteNumber(tacticalAnchor?.x) || !finiteNumber(tacticalAnchor?.y)) {
+      throw new TypeError("A finite tactical anchor is required for snapping");
+    }
+
+    const firstCellCenter = pointFromGrid(
+      "getCenterPoint",
+      grid.getCenterPoint({ i: 0, j: 0 })
+    );
+    const candidateTopLeft = {
+      x: firstCellCenter.x + (tacticalAnchor.x - 0.5) * sizeX
+        - data.width * sizeX / 2,
+      y: firstCellCenter.y + (tacticalAnchor.y - 0.5) * sizeY
+        - data.height * sizeY / 2
+    };
+    const position = this.snapTokenPosition(token, scene, candidateTopLeft, { grid });
+    return Object.freeze({
+      position,
+      tacticalX: (position.x + data.width * sizeX / 2 - firstCellCenter.x) / sizeX + 0.5,
+      tacticalY: (position.y + data.height * sizeY / 2 - firstCellCenter.y) / sizeY + 0.5
+    });
   }
 
   /** Convert an integer tactical grid-step delta to a new token top-left. */
