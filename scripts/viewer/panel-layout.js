@@ -4,6 +4,7 @@ import { VIEW_DEFINITIONS } from "../constants.js";
 export const PANEL_COUNTS = Object.freeze([1, 2, 3, 4]);
 export const MIN_PANEL_WIDTH = 180;
 export const MIN_PANEL_HEIGHT = 120;
+export const PANEL_GRID_GAP = 4;
 export const DEFAULT_PANEL_VIEWS = Object.freeze(["top", "north", "iso-ne", "west"]);
 export const DEFAULT_SPLITTER_PROPORTIONS = Object.freeze([0.5, 0.5]);
 
@@ -21,6 +22,37 @@ export function clampSplitterProportion(value, total, minimum) {
   if (minimumRatio >= 0.5) return 0.5;
   const number = Number.isFinite(value) ? value : 0.5;
   return Math.min(1 - minimumRatio, Math.max(minimumRatio, number));
+}
+
+/**
+ * Describe the responsive panel geometry without reading from the DOM. A
+ * narrow viewer stacks panels into one column so panel toolbars keep a real
+ * layout box instead of overflowing a two-column grid track.
+ */
+export function getPanelLayoutState(panelCount, width, {
+  gap = PANEL_GRID_GAP,
+  minimumPanelWidth = MIN_PANEL_WIDTH
+} = {}) {
+  const count = normalizePanelCount(panelCount);
+  const numericWidth = Number.isFinite(width) && width > 0 ? width : 0;
+  const twoColumnMinimum = minimumPanelWidth * 2 + gap;
+  const columns = numericWidth >= twoColumnMinimum ? 2 : 1;
+  const narrow = numericWidth > 0 && numericWidth < twoColumnMinimum;
+  const recommendedPanelCount = numericWidth > 0 && numericWidth < minimumPanelWidth
+    ? 1
+    : Math.min(count, 2);
+  const warning = narrow && count > 2
+    ? `This width is cramped for ${count} panels. Reduce to ${recommendedPanelCount} panels.`
+    : "";
+
+  return Object.freeze({
+    panelCount: count,
+    width: numericWidth,
+    columns,
+    narrow,
+    recommendedPanelCount,
+    warning
+  });
 }
 
 function normalizedSplit(value) {

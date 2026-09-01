@@ -298,13 +298,15 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: no linked or installed Foundry VTT v14 executable/test World was available for repeated Scene switching and native external-edit verification; automated lifecycle and synchronization coverage passed.
 
 ### P27 — Accessibility/responsive/keyboards
-- [ ] Accessible controls/labels.
-- [ ] keyboard alternatives for movement/orientation.
-- [ ] focus-scoped shortcuts.
-- [ ] reduced motion.
-- [ ] selected-token accessible summary.
-- [ ] narrow-window behavior.
-- [ ] 1–4 panel controls remain usable.
+- [x] Accessible controls/labels.
+- [x] keyboard alternatives for movement/orientation.
+- [x] focus-scoped shortcuts.
+- [x] reduced motion.
+- [x] selected-token accessible summary.
+- [x] narrow-window behavior.
+- [x] 1–4 panel controls remain usable.
+- [!] Manual Foundry v14 accessibility smoke check.
+  - Blocked: no Foundry v14 executable or test World is available in this workspace; automated DOM/controller coverage passed for selection, movement, heading, pitch, panel view choice, and overlap selection.
 
 ### P28 — Performance
 - [ ] Static grid/background caching.

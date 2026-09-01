@@ -5,6 +5,7 @@ import { VIEW_REGISTRY } from "../view-registry.js";
 import {
   MIN_PANEL_HEIGHT,
   MIN_PANEL_WIDTH,
+  getPanelLayoutState,
   PANEL_COUNTS,
   clampSplitterProportion,
   defaultPanelAreas,
@@ -50,6 +51,10 @@ function documentFor(options) {
     ?? globalThis?.document;
 }
 
+function reducedMotionPreference() {
+  return globalThis?.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+}
+
 function viewFor(layout, index, registry) {
   const requested = layout?.panels?.[index]?.view;
   return registry.has(requested) && isRenderableView(requested) ? requested : "top";
@@ -92,6 +97,8 @@ function makeState(scene, persistenceService, registry) {
       center: layout.links?.center ?? true,
       zoom: layout.links?.zoom ?? true
     },
+    responsive: getPanelLayoutState(layout.panelCount, 0),
+    reducedMotion: false,
     panels: layout.panels.map((panel, index) => ({
       view: viewFor(layout, index, registry),
       dimensions: { width: 0, height: 0 },
@@ -175,6 +182,7 @@ export function createTacticalViewerApplicationClass({
         devicePixelRatio,
         renderer,
         onClosed,
+        reducedMotion,
         projectionEngine = new ProjectionEngine(),
         ...applicationOptions
       } = options;
@@ -199,6 +207,7 @@ export function createTacticalViewerApplicationClass({
         : Math.max(1, globalThis?.devicePixelRatio ?? 1);
       this.renderer = renderer;
       this.onClosed = onClosed;
+      this.reducedMotionOverride = typeof reducedMotion === "boolean" ? reducedMotion : undefined;
       this.projectionEngine = projectionEngine;
       this.state = makeState(scene, persistenceService, viewRegistry);
       this.viewport = { width: 0, height: 0 };
@@ -214,8 +223,10 @@ export function createTacticalViewerApplicationClass({
       this.panelCountSelect = undefined;
       this.zoomLabel = undefined;
       this.pitchSelect = undefined;
+      this.pitchSelects = [];
       this.selectedTokenReadout = undefined;
       this.actionMessageElement = undefined;
+      this.responsiveWarning = undefined;
       this.overlapChooserElement = undefined;
       this.overlapChooserSelect = undefined;
       this.overlapChooserCandidates = [];
@@ -283,7 +294,8 @@ export function createTacticalViewerApplicationClass({
     }
 
     getVisibleTacticalStates() {
-      return this.tacticalStateService?.getVisibleTacticalStates?.(this.scene) ?? [];
+      return (this.tacticalStateService?.getVisibleTacticalStates?.(this.scene) ?? [])
+        .filter((state) => state?.visibleToCurrentUser === true);
     }
 
     /** Rebuild disposable view state from the current Scene TokenDocuments. */
@@ -629,6 +641,7 @@ export function createTacticalViewerApplicationClass({
     setPanelGridStyles() {
       if (!this.panelGridElement) return;
       const areas = defaultPanelAreas(this.state.panelCount);
+      const columns = this.state.responsive?.columns ?? 2;
       const [columnSplit, rowSplit] = this.state.splits;
       this.panelGridElement.style.setProperty?.(
         "--tactical-column-split", `${columnSplit * 100}%`
@@ -636,17 +649,20 @@ export function createTacticalViewerApplicationClass({
       this.panelGridElement.style.setProperty?.(
         "--tactical-row-split", `${rowSplit * 100}%`
       );
-      this.panelGridElement.style.gridTemplateColumns = this.state.panelCount === 1
+      this.panelGridElement.style.gridTemplateColumns = this.state.panelCount === 1 || columns === 1
         ? "minmax(0, 1fr)"
         : "minmax(0, var(--tactical-column-split)) minmax(0, 1fr)";
-      this.panelGridElement.style.gridTemplateRows = this.state.panelCount >= 3
+      this.panelGridElement.style.gridTemplateRows = columns === 1 && this.state.panelCount > 1
+        ? `repeat(${this.state.panelCount}, minmax(0, 1fr))`
+        : this.state.panelCount >= 3
         ? "minmax(0, var(--tactical-row-split)) minmax(0, 1fr)"
         : "minmax(0, 1fr)";
       this.panelElements.forEach((panel, index) => {
         const area = areas[index];
         if (!area) return;
-        panel.style.gridColumn = `${area.column} / span ${area.columnSpan}`;
-        panel.style.gridRow = `${area.row} / span ${area.rowSpan}`;
+        panel.style.gridColumn = columns === 1 ? "1" : `${area.column} / span ${area.columnSpan}`;
+        panel.style.gridRow = columns === 1 ? `${index + 1}` : `${area.row} / span ${area.rowSpan}`;
+        panel.style.minWidth = "0";
       });
       const splitters = [
         this.panelGridElement.querySelector?.('[data-role="splitter-columns"]'),
@@ -654,14 +670,14 @@ export function createTacticalViewerApplicationClass({
       ].filter(Boolean);
       for (const splitter of splitters) {
         splitter.hidden = splitter.dataset.axis === "columns"
-          ? this.state.panelCount < 2
-          : this.state.panelCount < 3;
+          ? this.state.panelCount < 2 || columns < 2
+          : this.state.panelCount < 3 || columns < 2;
         splitter.setAttribute?.("aria-valuenow", String(
           splitter.dataset.axis === "columns" ? columnSplit : rowSplit
         ));
       }
       const rowSplitter = this.panelGridElement.querySelector?.('[data-role="splitter-rows"]');
-      if (rowSplitter) rowSplitter.style.left = this.state.panelCount === 3
+      if (rowSplitter) rowSplitter.style.left = this.state.panelCount === 3 && columns > 1
         ? `${columnSplit * 100}%`
         : "0";
     }
@@ -738,23 +754,44 @@ export function createTacticalViewerApplicationClass({
     }
 
     updateInteractionControls(visibleTacticalStates = this.getVisibleTacticalStates()) {
-      const selected = visibleTacticalStates.find((state) =>
-        state?.tokenId === this.state.selectedTokenId
-      );
-      const disabled = this.state.panels[0]?.view !== "top"
-        || selected?.canCurrentUserRotate !== true;
-      for (const role of ["heading-decrease", "heading-increase"]) {
-        const control = this.element?.querySelector?.(`[data-role="${role}"]`);
-        if (control) control.disabled = disabled;
-      }
-      const pitchDisabled = !["north", "south", "east", "west"].includes(this.state.panels[0]?.view)
-        || selected?.canCurrentUserRotate !== true;
-      if (this.pitchSelect) {
-        this.pitchSelect.disabled = pitchDisabled;
-        if (selected && Number.isFinite(selected.pitch)) {
-          this.pitchSelect.value = String(selected.pitch);
+      this.panelElements.forEach((panelElement, index) => {
+        const panel = this.state.panels[index];
+        if (!panel || !panelElement) return;
+        const selected = visibleTacticalStates.find((state) =>
+          state?.tokenId === this.getSelectedTokenId(index)
+        );
+        const movementDisabled = isometricView(panel.view)
+          || selected?.visibleToCurrentUser !== true
+          || selected?.canCurrentUserMove !== true;
+        const definition = this.projectionEngine.describe(panel.view);
+        for (const role of ["move-left", "move-right", "move-up", "move-down"]) {
+          const control = panelElement.querySelector?.(`[data-role="${role}"]`);
+          if (control) control.disabled = movementDisabled;
         }
-      }
+        for (const role of ["z-decrease", "z-increase"]) {
+          const control = panelElement.querySelector?.(`[data-role="${role}"]`);
+          if (control) control.disabled = movementDisabled || !definition.visibleAxes?.includes("z");
+        }
+        for (const role of ["heading-decrease", "heading-increase"]) {
+          const control = panelElement.querySelector?.(`[data-role="${role}"]`);
+          if (control) control.disabled = selected?.visibleToCurrentUser !== true
+            || selected?.canCurrentUserRotate !== true;
+        }
+        const pitchDisabled = !["north", "south", "east", "west"].includes(panel.view)
+          || selected?.visibleToCurrentUser !== true
+          || selected?.canCurrentUserRotate !== true;
+        for (const role of ["pitch-previous", "pitch-next"]) {
+          const control = panelElement.querySelector?.(`[data-role="${role}"]`);
+          if (control) control.disabled = pitchDisabled;
+        }
+        const pitchSelect = panelElement.querySelector?.('[data-role="pitch-select"]');
+        if (pitchSelect) {
+          pitchSelect.disabled = pitchDisabled;
+          if (selected && Number.isFinite(selected.pitch)) {
+            pitchSelect.value = String(selected.pitch);
+          }
+        }
+      });
     }
 
     handleMovementPreview(preview) {
@@ -768,10 +805,12 @@ export function createTacticalViewerApplicationClass({
       this.requestRender({ type: "tactical-action-result", status: result?.status });
     }
 
-    async setHeadingBy(delta) {
-      const selected = this.getSelectedTacticalState();
+    async setHeadingBy(delta, panelIndex = 0) {
+      const selected = this.getSelectedTacticalState(panelIndex);
       const document = selected ? this.getTokenById(selected.tokenId) : null;
-      if (!selected || !document || typeof this.tacticalUpdateService?.setHeading !== "function") {
+      if (!selected || selected.visibleToCurrentUser !== true
+        || selected.canCurrentUserRotate !== true
+        || !document || typeof this.tacticalUpdateService?.setHeading !== "function") {
         return null;
       }
       const snapshot = this.tacticalUpdateService.captureInteractionSnapshot(document);
@@ -784,16 +823,28 @@ export function createTacticalViewerApplicationClass({
       return result;
     }
 
-    async setPitchTo(pitch) {
-      const selected = this.getSelectedTacticalState();
+    async setPitchTo(pitch, panelIndex = 0) {
+      const selected = this.getSelectedTacticalState(panelIndex);
       const document = selected ? this.getTokenById(selected.tokenId) : null;
-      if (!selected || !document || typeof this.tacticalUpdateService?.setPitch !== "function") {
+      if (!selected || selected.visibleToCurrentUser !== true
+        || selected.canCurrentUserRotate !== true
+        || !document || typeof this.tacticalUpdateService?.setPitch !== "function") {
         return null;
       }
       const snapshot = this.tacticalUpdateService.captureInteractionSnapshot(document);
       const result = await this.tacticalUpdateService.setPitch(document, pitch, snapshot);
       this.handleActionResult(result);
       return result;
+    }
+
+    async setPitchBy(delta, panelIndex = 0) {
+      const selected = this.getSelectedTacticalState(panelIndex);
+      const currentIndex = ALLOWED_PITCHES.indexOf(selected?.pitch);
+      if (currentIndex < 0) return null;
+      const nextIndex = Math.min(ALLOWED_PITCHES.length - 1,
+        Math.max(0, currentIndex + delta));
+      if (nextIndex === currentIndex) return null;
+      return this.setPitchTo(ALLOWED_PITCHES[nextIndex], panelIndex);
     }
 
     createInputController() {
@@ -817,6 +868,9 @@ export function createTacticalViewerApplicationClass({
         onViewChanged: (change) => this.handlePanelViewChanged(index, change),
         onMovementPreview: (preview) => this.handleMovementPreview(preview),
         onActionResult: (result) => this.handleActionResult(result),
+        getSelectedTokenState: () => this.getSelectedTacticalState(index),
+        onHeadingDelta: (delta) => this.setHeadingBy(delta, index),
+        onPitchDelta: (delta) => this.setPitchBy(delta, index),
         requestRender: (invalidation) => this.requestRender(invalidation)
       });
       return this.inputControllers[index];
@@ -831,13 +885,18 @@ export function createTacticalViewerApplicationClass({
 
       const root = this.domDocument.createElement("div");
       addClass(root, "tactical-viewer-shell");
+      this.state.reducedMotion = this.reducedMotionOverride ?? reducedMotionPreference();
+      if (this.state.reducedMotion) addClass(root, "tactical-viewer-reduced-motion");
+      root.dataset.reducedMotion = String(this.state.reducedMotion);
 
       const toolbar = this.domDocument.createElement("div");
       addClass(toolbar, "tactical-viewer-shared-toolbar");
       setRole(toolbar, "shared-toolbar");
       const panelCountLabel = this.domDocument.createElement("label");
       panelCountLabel.textContent = "Panels";
+      panelCountLabel.htmlFor = `${MODULE_ID}-panel-count`;
       const panelCountSelect = this.domDocument.createElement("select");
+      panelCountSelect.id = `${MODULE_ID}-panel-count`;
       panelCountSelect.setAttribute?.("aria-label", "Panel count");
       setRole(panelCountSelect, "panel-count");
       for (const count of PANEL_COUNTS) {
@@ -901,10 +960,18 @@ export function createTacticalViewerApplicationClass({
         setRole(zoomLabel, "zoom-label");
         const zoomIn = makeButton(this.domDocument, "+", "zoom-in", "Zoom in");
         const resetView = makeButton(this.domDocument, "Reset", "reset-view", "Reset view");
+        const moveLeft = makeButton(this.domDocument, "←", "move-left", "Move one cell left");
+        const moveRight = makeButton(this.domDocument, "→", "move-right", "Move one cell right");
+        const moveUp = makeButton(this.domDocument, "↑", "move-up", "Move one cell up");
+        const moveDown = makeButton(this.domDocument, "↓", "move-down", "Move one cell down");
+        const zDecrease = makeButton(this.domDocument, "Z−", "z-decrease", "Move down one tactical Z level");
+        const zIncrease = makeButton(this.domDocument, "Z+", "z-increase", "Move up one tactical Z level");
         const headingDecrease = makeButton(this.domDocument, "−45°", "heading-decrease", "Rotate heading left 45 degrees");
         const headingIncrease = makeButton(this.domDocument, "+45°", "heading-increase", "Rotate heading right 45 degrees");
+        const pitchPrevious = makeButton(this.domDocument, "Pitch −", "pitch-previous", "Previous pitch");
+        const pitchNext = makeButton(this.domDocument, "Pitch +", "pitch-next", "Next pitch");
         const pitchSelect = this.domDocument.createElement("select");
-        pitchSelect.setAttribute?.("aria-label", "Pitch");
+        pitchSelect.setAttribute?.("aria-label", `Panel ${index + 1} pitch`);
         setRole(pitchSelect, "pitch-select");
         for (const pitch of ALLOWED_PITCHES) {
           const option = this.domDocument.createElement("option");
@@ -912,9 +979,9 @@ export function createTacticalViewerApplicationClass({
           option.textContent = `${pitch > 0 ? "+" : ""}${pitch}°`;
           pitchSelect.appendChild(option);
         }
-        pitchSelect.addEventListener?.("change", () => {
+          pitchSelect.addEventListener?.("change", () => {
           const pitch = Number(pitchSelect.value);
-          if (ALLOWED_PITCHES.includes(pitch)) this.setPitchTo(pitch);
+          if (ALLOWED_PITCHES.includes(pitch)) this.setPitchTo(pitch, index);
         });
         const optionsButton = makeButton(this.domDocument, "Options", "panel-options", "Panel options");
         const interactionStatus = this.domDocument.createElement("span");
@@ -931,7 +998,7 @@ export function createTacticalViewerApplicationClass({
           checkbox.type = "checkbox";
           checkbox.checked = this.state.panels[index].overlays[key] === true;
           setRole(checkbox, `overlay-${key}`);
-          checkbox.setAttribute?.("aria-label", `${key} overlay`);
+          checkbox.setAttribute?.("aria-label", `Panel ${index + 1} ${key} overlay`);
           checkbox.addEventListener?.("change", () => this.setPanelOverlay(index, key, checkbox.checked));
           label.textContent = key;
           label.appendChild(checkbox);
@@ -939,7 +1006,9 @@ export function createTacticalViewerApplicationClass({
         }
         panelToolbar.append(
           viewSelect, zoomOut, zoomLabel, zoomIn, resetView,
+          moveLeft, moveRight, moveUp, moveDown, zDecrease, zIncrease,
           headingDecrease, headingIncrease, pitchSelect, optionsButton, options,
+          pitchPrevious, pitchNext,
           interactionStatus
         );
 
@@ -947,6 +1016,9 @@ export function createTacticalViewerApplicationClass({
         addClass(canvas, "tactical-viewer-canvas");
         setRole(canvas, "canvas");
         canvas.setAttribute?.("aria-label", `Panel ${index + 1} tactical projection canvas`);
+        canvas.setAttribute?.("tabindex", "0");
+        canvas.tabIndex = 0;
+        canvas.setAttribute?.("aria-keyshortcuts", "ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown [ ] , .");
         panel.append(panelToolbar, canvas);
         panelGrid.appendChild(panel);
         this.panelElements.push(panel);
@@ -956,20 +1028,48 @@ export function createTacticalViewerApplicationClass({
         zoomOut.addEventListener?.("click", () => controller?.zoomOut());
         zoomIn.addEventListener?.("click", () => controller?.zoomIn());
         resetView.addEventListener?.("click", () => controller?.resetView());
-        headingDecrease.addEventListener?.("click", () => this.setHeadingBy(-45));
-        headingIncrease.addEventListener?.("click", () => this.setHeadingBy(45));
+        moveLeft.addEventListener?.("click", () => controller?.handleKeyDown({
+          key: "ArrowLeft", target: moveLeft, preventDefault: () => {}
+        }));
+        moveRight.addEventListener?.("click", () => controller?.handleKeyDown({
+          key: "ArrowRight", target: moveRight, preventDefault: () => {}
+        }));
+        moveUp.addEventListener?.("click", () => controller?.handleKeyDown({
+          key: "ArrowUp", target: moveUp, preventDefault: () => {}
+        }));
+        moveDown.addEventListener?.("click", () => controller?.handleKeyDown({
+          key: "ArrowDown", target: moveDown, preventDefault: () => {}
+        }));
+        zDecrease.addEventListener?.("click", () => controller?.handleKeyDown({
+          key: "PageDown", target: zDecrease, preventDefault: () => {}
+        }));
+        zIncrease.addEventListener?.("click", () => controller?.handleKeyDown({
+          key: "PageUp", target: zIncrease, preventDefault: () => {}
+        }));
+        headingDecrease.addEventListener?.("click", () => this.setHeadingBy(-45, index));
+        headingIncrease.addEventListener?.("click", () => this.setHeadingBy(45, index));
+        pitchPrevious.addEventListener?.("click", () => this.setPitchBy(-1, index));
+        pitchNext.addEventListener?.("click", () => this.setPitchBy(1, index));
       }
 
       const columnSplitter = this.domDocument.createElement("div");
       setRole(columnSplitter, "splitter-columns");
       columnSplitter.dataset.axis = "columns";
       columnSplitter.setAttribute?.("role", "separator");
+      columnSplitter.setAttribute?.("aria-label", "Resize panel columns");
+      columnSplitter.setAttribute?.("aria-orientation", "vertical");
+      columnSplitter.setAttribute?.("tabindex", "0");
+      columnSplitter.tabIndex = 0;
       columnSplitter.addEventListener?.("pointerdown", (event) => this.beginSplitterDrag("columns", columnSplitter, event));
       panelGrid.appendChild(columnSplitter);
       const rowSplitter = this.domDocument.createElement("div");
       setRole(rowSplitter, "splitter-rows");
       rowSplitter.dataset.axis = "rows";
       rowSplitter.setAttribute?.("role", "separator");
+      rowSplitter.setAttribute?.("aria-label", "Resize panel rows");
+      rowSplitter.setAttribute?.("aria-orientation", "horizontal");
+      rowSplitter.setAttribute?.("tabindex", "0");
+      rowSplitter.tabIndex = 0;
       rowSplitter.addEventListener?.("pointerdown", (event) => this.beginSplitterDrag("rows", rowSplitter, event));
       panelGrid.appendChild(rowSplitter);
 
@@ -978,11 +1078,18 @@ export function createTacticalViewerApplicationClass({
       selectedTokenReadout.setAttribute?.("aria-live", "polite");
       selectedTokenReadout.setAttribute?.("aria-atomic", "true");
       setRole(selectedTokenReadout, "selected-token-readout");
+      selectedTokenReadout.setAttribute?.("role", "status");
       selectedTokenReadout.textContent = "No tactical token selected";
       const actionMessage = this.domDocument.createElement("div");
       addClass(actionMessage, "tactical-viewer-action-message");
       actionMessage.setAttribute?.("aria-live", "polite");
       setRole(actionMessage, "action-message");
+      const responsiveWarning = this.domDocument.createElement("div");
+      addClass(responsiveWarning, "tactical-viewer-responsive-warning");
+      responsiveWarning.setAttribute?.("role", "status");
+      responsiveWarning.setAttribute?.("aria-live", "polite");
+      setRole(responsiveWarning, "responsive-warning");
+      responsiveWarning.hidden = true;
       root.append(toolbar, panelGrid);
       const overlapChooser = this.domDocument.createElement("div");
       addClass(overlapChooser, "tactical-viewer-overlap-chooser");
@@ -1003,18 +1110,27 @@ export function createTacticalViewerApplicationClass({
         this.hideOverlapChooser();
         this.handleSelectionChanged(selected.tokenId, selectedPanelIndex);
       });
+      overlapSelect.addEventListener?.("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault?.();
+        this.hideOverlapChooser();
+      });
       overlapLabel.appendChild(overlapSelect);
       overlapChooser.appendChild(overlapLabel);
       root.appendChild(overlapChooser);
       root.appendChild(selectedTokenReadout);
       root.appendChild(actionMessage);
+      root.appendChild(responsiveWarning);
 
       this.panelGridElement = panelGrid;
       this.panelCountSelect = panelCountSelect;
       this.zoomLabel = this.panelElements[0]?.querySelector?.('[data-role="zoom-label"]');
       this.pitchSelect = this.panelElements[0]?.querySelector?.('[data-role="pitch-select"]');
+      this.pitchSelects = this.panelElements.map((panel) =>
+        panel.querySelector?.('[data-role="pitch-select"]'));
       this.selectedTokenReadout = selectedTokenReadout;
       this.actionMessageElement = actionMessage;
+      this.responsiveWarning = responsiveWarning;
       this.overlapChooserElement = overlapChooser;
       this.overlapChooserSelect = overlapSelect;
       this.setPanelGridStyles();
@@ -1066,6 +1182,7 @@ export function createTacticalViewerApplicationClass({
       if (!this.state.panels[index]) return this.getViewportDimensions();
       this.state.panels[index].dimensions = { width, height };
       if (index === 0) this.viewport = { width, height };
+      if (index === 0) this.updateResponsiveState(width);
       const canvas = this.canvases[index];
       if (canvas) {
         canvas.style.width = `${width}px`;
@@ -1076,6 +1193,16 @@ export function createTacticalViewerApplicationClass({
       this.setPanelGridStyles();
       if (this.attached) this.requestRender({ type: "resize" });
       return this.getViewportDimensions();
+    }
+
+    updateResponsiveState(width) {
+      this.state.responsive = getPanelLayoutState(this.state.panelCount, width);
+      if (this.responsiveWarning) {
+        this.responsiveWarning.textContent = this.state.responsive.warning;
+        this.responsiveWarning.hidden = this.state.responsive.warning === "";
+      }
+      this.setPanelGridStyles();
+      return this.state.responsive;
     }
 
     requestRender(invalidation = undefined) {

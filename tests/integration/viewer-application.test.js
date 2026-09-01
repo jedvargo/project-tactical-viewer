@@ -738,6 +738,74 @@ describe("TacticalViewerApplication", () => {
     expect(select.children.map((option) => option.textContent)).toEqual([
       "Lower · Z=1", "Upper · Z=4"
     ]);
+
+    select.dispatchEvent({ type: "keydown", key: "Escape", preventDefault: vi.fn() });
+    expect(chooser.hidden).toBe(true);
+  });
+
+  it("keeps panel controls focusable and named, exposes reduced-motion state, and warns at narrow widths", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService: { getSceneLayout: () => ({ panelCount: 4 }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      document,
+      scheduler
+    });
+
+    await application.render(true);
+
+    expect(application.element.classList.contains("tactical-viewer-reduced-motion")).toBe(true);
+    expect(application.element.dataset.reducedMotion).toBe("true");
+    for (const role of [
+      "panel-count", "view-select", "zoom-out", "zoom-in", "reset-view",
+      "move-left", "move-right", "move-up", "move-down", "z-decrease", "z-increase",
+      "heading-decrease", "heading-increase", "pitch-previous", "pitch-next",
+      "pitch-select", "panel-options"
+    ]) {
+      const controls = application.element.querySelectorAll(`[data-role="${role}"]`);
+      expect(controls.length).toBeGreaterThan(0);
+      controls.forEach((control) => {
+        expect(control.attributes.get("aria-label")).toBeTruthy();
+      });
+    }
+    expect(application.element.querySelectorAll("canvas").every((canvas) => canvas.tabIndex === 0))
+      .toBe(true);
+
+    application.updateViewport({ width: 320, height: 360 }, 0);
+    expect(application.state.responsive).toMatchObject({ narrow: true, columns: 1 });
+    expect(application.element.querySelector('[data-role="responsive-warning"]').hidden).toBe(false);
+  });
+
+  it("does not put a hidden state into the selected-token accessible summary", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const tacticalStateService = {
+      getVisibleTacticalStates: () => [
+        { tokenId: "secret", name: "Secret Ship", visibleToCurrentUser: false },
+        { tokenId: "visible", name: "Visible Ship", tacticalX: 1, tacticalY: 2,
+          tacticalZ: 3, visibleToCurrentUser: true }
+      ]
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1 }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      tacticalStateService,
+      document,
+      scheduler
+    });
+
+    await application.render(true);
+    application.state.selectedTokenId = "secret";
+    application.updateSelectedTokenReadout();
+
+    expect(application.element.querySelector('[data-role="selected-token-readout"]').textContent)
+      .not.toContain("Secret Ship");
   });
 
   it("persists the bounded layout before close and refreshes selection from current Documents", async () => {

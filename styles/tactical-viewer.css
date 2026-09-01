@@ -8,15 +8,30 @@
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   flex-direction: column;
+  max-width: 100%;
+  overflow: hidden;
+  width: 100%;
 }
 
 .tactical-viewer-shared-toolbar {
   align-items: center;
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 0.35rem;
+  min-width: 0;
   padding: 0.25rem;
+}
+
+.tactical-3d-viewer button:focus-visible,
+.tactical-3d-viewer select:focus-visible,
+.tactical-3d-viewer input:focus-visible,
+.tactical-3d-viewer canvas:focus-visible,
+.tactical-3d-viewer [role="separator"]:focus-visible {
+  outline: 2px solid #ffd166;
+  outline-offset: 2px;
 }
 
 .tactical-viewer-panel-grid {
@@ -32,12 +47,21 @@
   align-items: center;
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 0.25rem;
+  min-width: 0;
   padding: 0.25rem;
 }
 
+.tactical-viewer-panel-toolbar button,
+.tactical-viewer-panel-toolbar select,
+.tactical-viewer-shared-toolbar select {
+  min-height: 2rem;
+}
+
 .tactical-viewer-panel-toolbar select {
-  min-width: 7rem;
+  flex: 1 1 7rem;
+  min-width: min(7rem, 100%);
 }
 
 .tactical-viewer-panel-toolbar [data-role="zoom-label"] {
@@ -68,7 +92,7 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 120px;
-  min-width: 180px;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -106,4 +130,43 @@
   flex: 0 0 auto;
   min-height: 1.25rem;
   padding: 0.15rem 0.35rem;
+}
+
+.tactical-viewer-responsive-warning {
+  color: #ffd166;
+  flex: 0 0 auto;
+  padding: 0.2rem 0.35rem;
+}
+
+.tactical-viewer-reduced-motion *,
+.tactical-viewer-reduced-motion *::before,
+.tactical-viewer-reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
+}
+
+@media (max-width: 367px) {
+  .tactical-viewer-panel-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .tactical-viewer-panel-toolbar {
+    align-items: stretch;
+  }
+
+  .tactical-viewer-panel-toolbar [data-role="interaction-status"] {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tactical-3d-viewer * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

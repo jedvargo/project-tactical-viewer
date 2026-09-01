@@ -27,6 +27,15 @@ function orthographicDefinition(projectionEngine, view) {
   return definition.basis ? null : definition;
 }
 
+function editableTarget(target) {
+  const tagName = String(target?.tagName ?? "").toUpperCase();
+  return tagName === "INPUT"
+    || tagName === "TEXTAREA"
+    || tagName === "SELECT"
+    || target?.isContentEditable === true
+    || target?.contentEditable === "true";
+}
+
 function tacticalPoint(state) {
   return {
     x: state.tacticalX,
@@ -98,12 +107,15 @@ export class PanelInputController {
     coordinateAdapter = new CoordinateAdapter(),
     tacticalUpdateService,
     getTokenById,
+    getSelectedTokenState,
     getRenderModel,
     onSelectionChanged,
     onOverlapChooser,
     onViewChanged,
     onMovementPreview,
     onActionResult,
+    onHeadingDelta,
+    onPitchDelta,
     requestRender,
     projectionEngine = new ProjectionEngine(),
     zoomStep = LOGICAL_ZOOM_STEP,
@@ -118,12 +130,17 @@ export class PanelInputController {
     this.coordinateAdapter = coordinateAdapter;
     this.tacticalUpdateService = tacticalUpdateService;
     this.getTokenById = typeof getTokenById === "function" ? getTokenById : () => null;
+    this.getSelectedTokenState = typeof getSelectedTokenState === "function"
+      ? getSelectedTokenState
+      : () => null;
     this.getRenderModel = typeof getRenderModel === "function" ? getRenderModel : () => null;
     this.onSelectionChanged = onSelectionChanged;
     this.onOverlapChooser = onOverlapChooser;
     this.onViewChanged = onViewChanged;
     this.onMovementPreview = onMovementPreview;
     this.onActionResult = onActionResult;
+    this.onHeadingDelta = onHeadingDelta;
+    this.onPitchDelta = onPitchDelta;
     this.requestRender = requestRender;
     this.projectionEngine = projectionEngine;
     this.zoomStep = zoomStep > 1 ? zoomStep : LOGICAL_ZOOM_STEP;
@@ -147,6 +164,7 @@ export class PanelInputController {
     this.handlePointerUp = this.handlePointerUp.bind(this);
     this.handlePointerCancel = this.handlePointerCancel.bind(this);
     this.handleWheel = this.handleWheel.bind(this);
+    this.handleKeyDown = this.handleKeyDown.bind(this);
     this.attach();
   }
 
@@ -157,6 +175,7 @@ export class PanelInputController {
     this.element.addEventListener("pointerup", this.handlePointerUp);
     this.element.addEventListener("pointercancel", this.handlePointerCancel);
     this.element.addEventListener("wheel", this.handleWheel, { passive: false });
+    this.element.addEventListener("keydown", this.handleKeyDown);
     this.attached = true;
     return true;
   }
@@ -168,6 +187,7 @@ export class PanelInputController {
     this.element?.removeEventListener?.("pointerup", this.handlePointerUp);
     this.element?.removeEventListener?.("pointercancel", this.handlePointerCancel);
     this.element?.removeEventListener?.("wheel", this.handleWheel);
+    this.element?.removeEventListener?.("keydown", this.handleKeyDown);
     this.attached = false;
     this.cancelPointer();
     return true;
@@ -356,10 +376,18 @@ export class PanelInputController {
     const snapshot = this.dragSnapshot;
     const token = this.dragToken;
     this.clearDragState();
-    const definition = orthographicDefinition(
-      this.projectionEngine,
-      this.currentCamera().view
-    );
+    const definition = orthographicDefinition(this.projectionEngine, this.currentCamera().view);
+    const result = await this.commitMovementDelta(preview?.delta, {
+      document,
+      token,
+      snapshot,
+      definition
+    });
+    this.setMovementPreview(null);
+    return result;
+  }
+
+  async commitMovementDelta(delta, { document, token, snapshot, definition } = {}) {
     const axisKey = definition?.visibleAxes?.join(",");
     const moveMethod = { "x,y": "moveXY", "x,z": "moveXZ", "y,z": "moveYZ" }[axisKey];
     const move = typeof this.tacticalUpdateService?.moveVisibleAxes === "function"
@@ -367,17 +395,82 @@ export class PanelInputController {
       : (typeof this.tacticalUpdateService?.[moveMethod] === "function"
         ? this.tacticalUpdateService[moveMethod].bind(this.tacticalUpdateService)
         : null);
-    if (!preview || !document || !move) {
-      this.setMovementPreview(null);
+    if (!delta || !document || !move) {
       return null;
     }
 
     const result = typeof this.tacticalUpdateService?.moveVisibleAxes === "function"
-      ? await move(document, this.scene, definition.visibleAxes, preview.delta, snapshot)
-      : await move(document, this.scene, preview.delta, snapshot);
-    this.setMovementPreview(null);
+      ? await move(document, this.scene, definition.visibleAxes, delta, snapshot)
+      : await move(document, this.scene, delta, snapshot);
     this.onActionResult?.(result, token);
     return result;
+  }
+
+  async moveByKeyboard(delta) {
+    const definition = orthographicDefinition(this.projectionEngine, this.currentCamera().view);
+    const selected = this.getSelectedTokenState();
+    if (!definition || !selected || selected.visibleToCurrentUser !== true
+      || selected.canCurrentUserMove !== true) return null;
+    const document = this.getTokenById(selected.tokenId);
+    if (!document || typeof this.tacticalUpdateService?.captureInteractionSnapshot !== "function") {
+      return null;
+    }
+    const normalizedDelta = Object.fromEntries(definition.visibleAxes.map((axis) => [
+      axis,
+      Number.isInteger(delta?.[axis]) ? delta[axis] : 0
+    ]));
+    if (Object.values(normalizedDelta).every((value) => value === 0)) return null;
+    const snapshot = this.tacticalUpdateService.captureInteractionSnapshot(document);
+    return this.commitMovementDelta(normalizedDelta, {
+      document,
+      token: selected,
+      snapshot,
+      definition
+    });
+  }
+
+  keyboardDelta(key) {
+    const definition = orthographicDefinition(this.projectionEngine, this.currentCamera().view);
+    if (!definition) return null;
+    const axisDelta = (axis, value) => ({ [axis]: value });
+    if (key === "ArrowLeft") {
+      return axisDelta(definition.horizontal.axis, -definition.horizontal.sign);
+    }
+    if (key === "ArrowRight") {
+      return axisDelta(definition.horizontal.axis, definition.horizontal.sign);
+    }
+    if (key === "ArrowUp") {
+      return axisDelta(definition.vertical.axis, definition.vertical.sign);
+    }
+    if (key === "ArrowDown") {
+      return axisDelta(definition.vertical.axis, -definition.vertical.sign);
+    }
+    if (key === "PageUp" && definition.visibleAxes.includes("z")) return { z: 1 };
+    if (key === "PageDown" && definition.visibleAxes.includes("z")) return { z: -1 };
+    return null;
+  }
+
+  async handleKeyDown(event) {
+    if (editableTarget(event?.target)) return false;
+    const key = event?.key;
+    if (["[", "]"].includes(key)) {
+      if (typeof this.onHeadingDelta !== "function") return false;
+      event.preventDefault?.();
+      await this.onHeadingDelta(key === "[" ? -45 : 45);
+      return true;
+    }
+    if ([",", "."].includes(key)) {
+      if (typeof this.onPitchDelta !== "function") return false;
+      event.preventDefault?.();
+      await this.onPitchDelta(key === "," ? -1 : 1);
+      return true;
+    }
+    const delta = this.keyboardDelta(key);
+    if (!delta) return false;
+    const result = await this.moveByKeyboard(delta);
+    if (result === null) return false;
+    event.preventDefault?.();
+    return true;
   }
 
   handlePointerDown(event) {
