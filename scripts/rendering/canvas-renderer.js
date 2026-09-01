@@ -13,6 +13,7 @@ const DEFAULT_TOKEN = "#e6b35a";
 const DEFAULT_TOKEN_STROKE = "#fff4cf";
 const DEFAULT_ORIENTATION = "#ff765e";
 const DEFAULT_TEXT = "#f3f5f7";
+const ZERO_Z_RANGE = Object.freeze({ min: 0, max: 0 });
 
 function finiteOr(value, fallback) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -159,6 +160,8 @@ function projectedGrid({ grid, camera, projectionEngine }) {
   return Object.freeze({
     columns: grid.columns,
     rows: grid.rows,
+    sourceColumns: grid.columns,
+    sourceRows: grid.rows,
     verticalLines: Object.freeze(verticalLines),
     horizontalLines: Object.freeze(horizontalLines)
   });
@@ -191,6 +194,8 @@ function projectedVerticalGrid({ grid, camera, projectionEngine, zRange, definit
   return Object.freeze({
     columns: extent,
     rows: zRange.max - zRange.min,
+    sourceColumns: grid.columns,
+    sourceRows: grid.rows,
     zMin: zRange.min,
     zMax: zRange.max,
     verticalLines: Object.freeze(verticalLines),
@@ -227,30 +232,64 @@ function projectedIsometricGrid({ grid, camera, projectionEngine, zRange }) {
   return Object.freeze({
     columns: grid.columns,
     rows: grid.rows,
+    sourceColumns: grid.columns,
+    sourceRows: grid.rows,
     zMin: zRange.min,
     zMax: zRange.max,
     lines: Object.freeze(lines)
   });
 }
 
-function staticKey(model, width, height, dpr) {
+function staticKeyFor({ sceneId, view, camera, grid, width, height, dpr, gridOverlay }) {
   return [
-    model.sceneId,
-    model.view,
-    model.camera.scale,
-    model.camera.focus.x,
-    model.camera.focus.y,
-    model.camera.focus.z,
-    model.camera.screenCenter.x,
-    model.camera.screenCenter.y,
+    sceneId,
+    view,
+    camera.scale,
+    camera.focus.x,
+    camera.focus.y,
+    camera.focus.z,
+    camera.screenCenter.x,
+    camera.screenCenter.y,
+    grid?.sourceColumns ?? grid?.columns,
+    grid?.sourceRows ?? grid?.rows,
+    grid?.zMin,
+    grid?.zMax,
     width,
     height,
     dpr,
-    model.overlays.grid
+    gridOverlay
   ].join(":");
 }
 
-function visibleToken(state, projectionEngine, camera, viewport, definition) {
+function staticKey(model, width, height, dpr) {
+  return staticKeyFor({
+    sceneId: model.sceneId,
+    view: model.view,
+    camera: model.camera,
+    grid: model.grid,
+    width,
+    height,
+    dpr,
+    gridOverlay: model.overlays.grid
+  });
+}
+
+function sceneGridKey(scene) {
+  const dimensions = scene?.dimensions ?? scene ?? {};
+  const grid = scene?.grid ?? {};
+  return [
+    scene?.id ?? scene?._id ?? "",
+    dimensions.width,
+    dimensions.height,
+    grid.type,
+    grid.size,
+    grid.sizeX,
+    grid.sizeY,
+    grid.distance
+  ].join(":");
+}
+
+function visibleToken(state, projectionEngine, camera, viewport, definition, selectedTokenId = null) {
   if (!state || state.visibleToCurrentUser !== true || state.participating !== true) return null;
   const worldPoint = {
     x: state.tacticalX,
@@ -279,7 +318,7 @@ function visibleToken(state, projectionEngine, camera, viewport, definition) {
   const artRotation = artDirectionLength > 1e-9
     ? Math.atan2(artDirection.y, artDirection.x) + Math.PI / 2 - forwardOffset
     : -forwardOffset;
-  return Object.freeze({
+  return {
     tokenId: state.tokenId,
     visibleToCurrentUser: true,
     name: typeof state.name === "string" ? state.name : "",
@@ -306,8 +345,9 @@ function visibleToken(state, projectionEngine, camera, viewport, definition) {
     hiddenAxisValue: definition.hiddenAxis ? worldPoint[definition.hiddenAxis] : null,
     point,
     orientation,
-    markerRadius
-  });
+    markerRadius,
+    selected: selectedTokenId !== null && state.tokenId === selectedTokenId
+  };
 }
 
 function compareTokenIds(left, right) {
@@ -405,11 +445,12 @@ function addOverlapMetadata(tokens, definition) {
       candidates
     });
   });
-  const enrichedTokens = tokens.map((token) => Object.freeze({
-    ...token,
-    ...(byToken.get(token.tokenId) ?? { stackId: null, stackCount: 1 })
-  }));
-  return { tokens: enrichedTokens, stacks: Object.freeze(stacks) };
+  for (const token of tokens) {
+    const metadata = byToken.get(token.tokenId);
+    token.stackId = metadata?.stackId ?? null;
+    token.stackCount = metadata?.stackCount ?? 1;
+  }
+  return { tokens, stacks: Object.freeze(stacks) };
 }
 
 /**
@@ -429,14 +470,17 @@ function createOrthographicRenderModel({
   pan,
   overlays = {},
   selectedTokenId = null,
-  movementPreview = null
+  movementPreview = null,
+  staticGridProvider,
+  gridGeometry
 } = {}) {
-  const gridGeometry = coordinateAdapter.getTopGrid(scene);
   const definition = projectionEngine.describe(view);
+  const tacticalGrid = gridGeometry ?? coordinateAdapter.getTopGrid(scene);
+  const zRange = definition.visibleAxes.includes("z") ? zBounds(tacticalStates) : ZERO_Z_RANGE;
   const camera = definition.basis
     ? cameraForIsometric({
       definition,
-      grid: gridGeometry,
+      grid: tacticalGrid,
       viewport,
       zoom,
       focus,
@@ -445,48 +489,68 @@ function createOrthographicRenderModel({
     })
     : cameraForOrthographic({
       definition,
-      grid: gridGeometry,
+      grid: tacticalGrid,
       viewport,
       zoom,
       focus,
       pan,
       tacticalStates
     });
-  const grid = definition.basis
+  const grid = staticGridProvider?.({
+    grid: tacticalGrid,
+    camera,
+    projectionEngine,
+    zRange,
+    definition
+  }) ?? (definition.basis
     ? projectedIsometricGrid({
-      grid: gridGeometry,
+      grid: tacticalGrid,
       camera,
       projectionEngine,
-      zRange: zBounds(tacticalStates)
+      zRange
     })
     : definition.visibleAxes.includes("z")
     ? projectedVerticalGrid({
-      grid: gridGeometry,
+      grid: tacticalGrid,
       camera,
       projectionEngine,
-      zRange: zBounds(tacticalStates),
+      zRange,
       definition
     })
-    : projectedGrid({ grid: gridGeometry, camera, projectionEngine });
-  const projectedTokens = (Array.isArray(tacticalStates) ? tacticalStates : [])
-      .map((state) => movementPreview?.tokenId === state?.tokenId
-        ? { ...state, ...movementPreview, preview: true }
-        : state)
-      .map((state) => visibleToken(state, projectionEngine, camera, viewport, definition))
-      .filter(Boolean)
-      .map((state) => Object.freeze({
-        ...state,
-        selected: selectedTokenId !== null && state.tokenId === selectedTokenId
-      }));
+    : projectedGrid({ grid: tacticalGrid, camera, projectionEngine }));
+  const projectedTokens = [];
+  let eligibleTokenCount = 0;
+  let culledTokenCount = 0;
+  for (const state of (Array.isArray(tacticalStates) ? tacticalStates : [])) {
+    const effectiveState = movementPreview?.tokenId === state?.tokenId
+      ? { ...state, ...movementPreview, preview: true }
+      : state;
+    if (effectiveState?.visibleToCurrentUser !== true || effectiveState?.participating !== true) {
+      continue;
+    }
+    eligibleTokenCount += 1;
+    const projected = visibleToken(
+      effectiveState,
+      projectionEngine,
+      camera,
+      viewport,
+      definition,
+      selectedTokenId
+    );
+    if (!projected) {
+      culledTokenCount += 1;
+      continue;
+    }
+    projectedTokens.push(projected);
+  }
   const withOverlapMetadata = addOverlapMetadata(projectedTokens, definition);
-  const tokens = Object.freeze(
-    (definition.basis
+  const orderedTokens = definition.basis
       ? projectionEngine.sortByDepth(withOverlapMetadata.tokens, camera, {
         getPoint: (token) => token.worldPoint
       })
-      : withOverlapMetadata.tokens)
-      .map((token) => Object.freeze(token))
-  );
+      : withOverlapMetadata.tokens;
+  for (const token of orderedTokens) Object.freeze(token);
+  const tokens = Object.freeze(orderedTokens);
   return Object.freeze({
     sceneId: scene?.id,
     view,
@@ -498,6 +562,11 @@ function createOrthographicRenderModel({
     movementPreview,
     selectedTokenId,
     axisLabels: projectionEngine.describe(view).labels,
+    renderStats: Object.freeze({
+      eligibleTokenCount,
+      visibleTokenCount: projectedTokens.length,
+      culledTokenCount
+    }),
     overlays: Object.freeze({
       grid: overlays.grid !== false,
       names: overlays.names !== false,
@@ -643,15 +712,120 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     coordinateAdapter = new CoordinateAdapter(),
     projectionEngine = new ProjectionEngine(),
     assetManager = new AssetManager(),
-    colors = {}
+    colors = {},
+    maxStaticLayers = 8,
+    debug = false
   } = {}) {
     super();
     this.coordinateAdapter = coordinateAdapter;
     this.projectionEngine = projectionEngine;
     this.assetManager = assetManager;
     this.colors = { ...colors };
-    this.staticGridCache = undefined;
+    this.maxStaticLayers = Number.isInteger(maxStaticLayers) && maxStaticLayers > 0
+      ? maxStaticLayers
+      : 8;
+    this.staticGridCache = new Map();
+    this.gridGeometryCache = new Map();
     this.pendingAssetInvalidations = new Set();
+    this.debug = debug === true;
+    this.debugMetrics = this.debug
+      ? {
+        frames: 0,
+        visibleTokens: 0,
+        culledTokens: 0,
+        artLookups: 0,
+        staticGridHits: 0,
+        staticGridMisses: 0,
+        staticSurfaceHits: 0,
+        staticSurfaceMisses: 0,
+        lastDurationMs: 0
+      }
+      : null;
+  }
+
+  get staticLayerCacheSize() {
+    return this.staticGridCache.size;
+  }
+
+  getDebugMetrics() {
+    return this.debugMetrics ? Object.freeze({ ...this.debugMetrics }) : null;
+  }
+
+  clearStaticCache() {
+    const removed = this.staticGridCache.size;
+    this.staticGridCache.clear();
+    return removed;
+  }
+
+  invalidate(invalidation = {}) {
+    if (["resize", "scene-update", "view-change"].includes(invalidation?.type)) {
+      this.clearStaticCache();
+    }
+    if (invalidation?.type === "scene-update") this.gridGeometryCache.clear();
+    return true;
+  }
+
+  getCachedGridGeometry(scene) {
+    const key = sceneGridKey(scene);
+    const existing = this.gridGeometryCache.get(key);
+    if (existing) return existing;
+    const geometry = this.coordinateAdapter.getTopGrid(scene);
+    this.gridGeometryCache.set(key, geometry);
+    while (this.gridGeometryCache.size > this.maxStaticLayers) {
+      const oldest = this.gridGeometryCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.gridGeometryCache.delete(oldest);
+    }
+    return geometry;
+  }
+
+  #touchStatic(key, record) {
+    this.staticGridCache.delete(key);
+    this.staticGridCache.set(key, record);
+  }
+
+  #trimStaticCache() {
+    while (this.staticGridCache.size > this.maxStaticLayers) {
+      const oldest = this.staticGridCache.keys().next().value;
+      if (oldest === undefined) return;
+      this.staticGridCache.delete(oldest);
+    }
+  }
+
+  getCachedGrid({ sceneId, view, camera, grid, width, height, dpr, gridOverlay,
+    projectionEngine, definition, zRange }) {
+    const isZView = definition.visibleAxes.includes("z");
+    const key = staticKeyFor({
+      sceneId,
+      view,
+      camera,
+      grid: {
+        columns: grid.columns,
+        rows: grid.rows,
+        zMin: isZView ? zRange.min : undefined,
+        zMax: isZView ? zRange.max : undefined
+      },
+      width,
+      height,
+      dpr,
+      gridOverlay
+    });
+    const existing = this.staticGridCache.get(key);
+    if (existing) {
+      if (this.debugMetrics) this.debugMetrics.staticGridHits += 1;
+      this.#touchStatic(key, existing);
+      return existing.grid;
+    }
+    if (this.debugMetrics) this.debugMetrics.staticGridMisses += 1;
+
+    const projected = definition.basis
+      ? projectedIsometricGrid({ grid, camera, projectionEngine, zRange })
+      : definition.visibleAxes.includes("z")
+      ? projectedVerticalGrid({ grid, camera, projectionEngine, zRange, definition })
+      : projectedGrid({ grid, camera, projectionEngine });
+    this.staticGridCache.set(key, { key, grid: projected, surface: null });
+    this.#trimStaticCache();
+    return projected;
   }
 
   buildModel(input) {
@@ -660,6 +834,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       scene: input.scene,
       coordinateAdapter: this.coordinateAdapter,
       projectionEngine: this.projectionEngine,
+      gridGeometry: this.getCachedGridGeometry(input.scene),
       tacticalStates: input.visibleTacticalStates,
       viewport: input.viewport,
       zoom: panel.zoom,
@@ -669,8 +844,29 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       selectedTokenId: input?.selectedTokenId ?? input?.state?.selectedTokenId,
       movementPreview: input?.state?.movementPreview
     };
+    const viewport = input.viewport;
+    const dpr = positiveOr(input.devicePixelRatio, 1);
+    const sceneId = input.scene?.id ?? input.scene?._id;
+    const staticGridProvider = ({ grid, camera, projectionEngine, zRange, definition }) =>
+      this.getCachedGrid({
+        sceneId,
+        view: panel.view,
+        camera,
+        grid,
+        width: dimensionsOf(viewport).width,
+        height: dimensionsOf(viewport).height,
+        dpr,
+        gridOverlay: panel.overlays?.grid !== false,
+        projectionEngine,
+        definition,
+        zRange
+      });
     if (!isRenderableView(panel.view)) return createTopRenderModel(modelOptions);
-    return createOrthographicRenderModel({ ...modelOptions, view: panel.view });
+    return createOrthographicRenderModel({
+      ...modelOptions,
+      view: panel.view,
+      staticGridProvider
+    });
   }
 
   drawStatic(context, model, width, height, dpr = 1, transform = true) {
@@ -706,14 +902,19 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
 
   getStaticLayer(model, canvas, width, height, dpr) {
     const key = staticKey(model, width, height, dpr);
-    if (this.staticGridCache?.key === key) return this.staticGridCache.surface;
+    const cached = this.staticGridCache.get(key);
+    if (cached?.surface) {
+      if (this.debugMetrics) this.debugMetrics.staticSurfaceHits += 1;
+      this.#touchStatic(key, cached);
+      return cached.surface;
+    }
+    if (this.debugMetrics) this.debugMetrics.staticSurfaceMisses += 1;
 
-    const document = canvas?.ownerDocument;
+    const document = canvas?.ownerDocument ?? globalThis?.document;
     const surface = typeof globalThis?.OffscreenCanvas === "function"
       ? new globalThis.OffscreenCanvas(Math.max(1, Math.round(width * dpr)), Math.max(1, Math.round(height * dpr)))
       : document?.createElement?.("canvas");
     if (!surface?.getContext) {
-      this.staticGridCache = { key, surface: null };
       return null;
     }
     surface.width = Math.max(1, Math.round(width * dpr));
@@ -721,13 +922,20 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     const staticContext = surface.getContext("2d");
     if (!staticContext) return null;
     this.drawStatic(staticContext, model, width, height, dpr);
-    this.staticGridCache = { key, surface };
+    const record = cached ?? { key, grid: model.grid, surface: null };
+    record.surface = surface;
+    this.staticGridCache.set(key, record);
+    this.#touchStatic(key, record);
+    this.#trimStaticCache();
     return surface;
   }
 
   render(input = {}) {
     const context = input.context;
     if (!context) return false;
+    const startedAt = this.debug
+      ? (globalThis?.performance?.now?.() ?? Date.now())
+      : 0;
     const model = input.model ?? this.buildModel(input);
     const { width, height } = dimensionsOf(input.viewport);
     const dpr = positiveOr(input.devicePixelRatio,
@@ -744,6 +952,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
 
     for (const token of model.tokens) {
       const { point, markerRadius, orientation } = token;
+      if (this.debugMetrics) this.debugMetrics.artLookups += 1;
       const art = this.assetManager?.peekArt?.(token.art, model.view);
       const configuredForwardOffset = finiteOr(token.art?.forwardOffset, 0);
       const resolvedForwardOffset = finiteOr(art?.forwardOffset, configuredForwardOffset);
@@ -820,6 +1029,13 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     }
 
     context.restore?.();
+    if (this.debugMetrics) {
+      this.debugMetrics.frames += 1;
+      this.debugMetrics.visibleTokens += model.renderStats?.visibleTokenCount
+        ?? model.tokens.length;
+      this.debugMetrics.culledTokens += model.renderStats?.culledTokenCount ?? 0;
+      this.debugMetrics.lastDurationMs = (globalThis?.performance?.now?.() ?? Date.now()) - startedAt;
+    }
     return true;
   }
 

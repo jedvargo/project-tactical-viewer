@@ -1190,6 +1190,7 @@ export function createTacticalViewerApplicationClass({
         canvas.width = Math.round(width * this.devicePixelRatio);
         canvas.height = Math.round(height * this.devicePixelRatio);
       }
+      this.renderer?.invalidate?.({ type: "resize", panelIndex: index });
       this.setPanelGridStyles();
       if (this.attached) this.requestRender({ type: "resize" });
       return this.getViewportDimensions();

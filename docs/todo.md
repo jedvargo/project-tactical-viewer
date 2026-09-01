@@ -309,14 +309,14 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: no Foundry v14 executable or test World is available in this workspace; automated DOM/controller coverage passed for selection, movement, heading, pitch, panel view choice, and overlap selection.
 
 ### P28 — Performance
-- [ ] Static grid/background caching.
-- [ ] culling.
-- [ ] rAF batching verified.
-- [ ] decoded-image cache.
-- [ ] no idle render loop.
-- [ ] 10/50/100-token profiling.
-- [ ] document measurements.
-- [ ] optimize only measured hotspots.
+- [x] Static grid/background caching.
+- [x] culling.
+- [x] rAF batching verified.
+- [x] decoded-image cache.
+- [x] no idle render loop.
+- [x] 10/50/100-token profiling.
+- [x] document measurements.
+- [x] optimize only measured hotspots.
 
 ### P29 — Reliability/interoperability
 - [ ] schema migration fixtures.
