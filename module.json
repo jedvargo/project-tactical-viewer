@@ -8,6 +8,9 @@
     "verified": "14",
     "maximum": "14"
   },
+  "styles": [
+    "styles/tactical-viewer.css"
+  ],
   "esmodules": [
     "scripts/main.js"
   ]

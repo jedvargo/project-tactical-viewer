@@ -144,13 +144,13 @@ A prompt may be marked complete only after its focused tests, full automated sui
 ## Viewer and orthographic MVP
 
 ### P13 — ApplicationV2 shell
-- [ ] Create viewer ApplicationV2.
-- [ ] One-panel layout.
-- [ ] Basic open/close.
-- [ ] Mount one Canvas2D surface.
-- [ ] Connect runtime services.
-- [ ] Resize observation.
-- [ ] Viewer opens without continuous repaint.
+- [x] Create viewer ApplicationV2.
+- [x] One-panel layout.
+- [x] Basic open/close.
+- [x] Mount one Canvas2D surface.
+- [x] Connect runtime services.
+- [x] Resize observation.
+- [x] Viewer opens without continuous repaint.
 
 ### P14 — Top renderer
 - [ ] Render tactical background/grid.

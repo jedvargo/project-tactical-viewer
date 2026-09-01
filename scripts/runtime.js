@@ -18,6 +18,7 @@ import { TacticalStateService } from "./tactical-state-service.js";
 import { TacticalUpdateService } from "./tactical-update-service.js";
 import { VisibilityService } from "./visibility-service.js";
 import { VIEW_REGISTRY } from "./view-registry.js";
+import { TacticalViewerApplication } from "./viewer/tactical-viewer-application.js";
 
 /**
  * Minimal composition root. Later prompts attach concrete services through
@@ -40,9 +41,11 @@ export function createRuntime({
   visibilityService,
   permissionService,
   tacticalStateService,
-  tacticalUpdateService
+  tacticalUpdateService,
+  viewerApplicationClass = TacticalViewerApplication
 } = {}) {
   let initialized = false;
+  let activeViewer;
   const services = new Map();
   const sceneEligibility = new SceneEligibilityService();
   const resolvedElevationAdapter = elevationAdapter
@@ -122,6 +125,53 @@ export function createRuntime({
       return setSceneEnabled(scene, enabled, { eligibilityService: sceneEligibility });
     },
 
+    async openViewer(scene, viewerOptions = {}) {
+      if (!this.isSceneEnabled(scene)) return null;
+
+      if (activeViewer?.scene === scene) {
+        if (!activeViewer.rendered && typeof activeViewer.render === "function") {
+          await activeViewer.render(true);
+        }
+        return activeViewer;
+      }
+
+      if (activeViewer && typeof activeViewer.close === "function") {
+        await activeViewer.close();
+      }
+
+      const Application = viewerOptions.applicationClass ?? viewerApplicationClass;
+      const {
+        applicationClass: ignoredApplicationClass,
+        ...applicationConfiguration
+      } = viewerOptions;
+      activeViewer = new Application({
+        ...applicationConfiguration,
+        scene,
+        viewRegistry,
+        persistenceService: resolvedPersistenceService,
+        synchronizationCoordinator: resolvedSynchronizationCoordinator
+      });
+
+      try {
+        await activeViewer.render?.(true);
+        return activeViewer;
+      } catch (error) {
+        activeViewer = undefined;
+        throw error;
+      }
+    },
+
+    async closeViewer() {
+      const viewer = activeViewer;
+      activeViewer = undefined;
+      if (viewer?.close) await viewer.close();
+      return viewer ?? null;
+    },
+
+    getViewerApplication() {
+      return activeViewer;
+    },
+
     attachService(name, service) {
       if (typeof name !== "string" || !name) {
         throw new TypeError("A runtime service requires a name");
@@ -189,6 +239,9 @@ export function createModuleApi(runtime) {
     moveYZ: (...args) => runtime.getService("tacticalUpdate").moveYZ(...args),
     setHeading: (...args) => runtime.getService("tacticalUpdate").setHeading(...args),
     setPitch: (...args) => runtime.getService("tacticalUpdate").setPitch(...args),
+    openViewer: (scene, options) => runtime.openViewer(scene, options),
+    closeViewer: () => runtime.closeViewer(),
+    getViewerApplication: () => runtime.getViewerApplication(),
     isSceneEligible: (scene) => runtime.isSceneEligible(scene),
     isSceneEnabled: (scene) => runtime.isSceneEnabled(scene),
     setSceneEnabled: (scene, enabled) => runtime.setSceneEnabled(scene, enabled)

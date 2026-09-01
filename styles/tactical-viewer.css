@@ -1,0 +1,42 @@
+.tactical-3d-viewer-application .window-content {
+  display: flex;
+  min-height: 0;
+  padding: 0;
+}
+
+.tactical-viewer-shell {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.tactical-viewer-panel-toolbar {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.25rem;
+  padding: 0.25rem;
+}
+
+.tactical-viewer-panel-toolbar select {
+  min-width: 7rem;
+}
+
+.tactical-viewer-panel-toolbar [data-role="zoom-label"] {
+  min-width: 3.25rem;
+  text-align: center;
+}
+
+.tactical-viewer-panel {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.tactical-viewer-canvas {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
