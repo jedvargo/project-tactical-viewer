@@ -59,6 +59,8 @@ describe("viewer runtime opening", () => {
     expect(viewer.rendered).toBe(true);
     expect(viewer.options.persistenceService).toBe(persistenceService);
     expect(viewer.options.synchronizationCoordinator).toBe(synchronizationCoordinator);
+    expect(viewer.options.tacticalStateService).toBe(runtime.getService("tacticalState"));
+    expect(viewer.options.renderer).toBe(runtime.getService("renderer"));
   });
 
   it("closes the active viewer before opening a different eligible Scene", async () => {

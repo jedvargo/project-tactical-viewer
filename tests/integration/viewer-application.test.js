@@ -267,4 +267,33 @@ describe("TacticalViewerApplication", () => {
     expect(FakeResizeObserver.instances.at(-1).disconnect).toHaveBeenCalledOnce();
     expect(token.update).not.toHaveBeenCalled();
   });
+
+  it("passes only visibility-filtered tactical states to the renderer", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const visibleStates = [{ tokenId: "visible", visibleToCurrentUser: true }];
+    const renderer = { render: vi.fn() };
+    const tacticalStateService = {
+      getVisibleTacticalStates: vi.fn(() => visibleStates)
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: createScene(),
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      tacticalStateService,
+      renderer,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    scheduler.flush();
+
+    expect(tacticalStateService.getVisibleTacticalStates).toHaveBeenCalledWith(application.scene);
+    expect(renderer.render).toHaveBeenCalledWith(expect.objectContaining({
+      visibleTacticalStates: visibleStates
+    }));
+  });
 });

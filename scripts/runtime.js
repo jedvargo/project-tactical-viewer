@@ -9,6 +9,7 @@ import { OrientationAdapter } from "./model/orientation-adapter.js";
 import { TacticalTokenState } from "./model/tactical-token-state.js";
 import { PermissionService } from "./permission-service.js";
 import { ProjectionEngine } from "./projection/projection-engine.js";
+import { Canvas2DRendererV1 } from "./rendering/canvas-renderer.js";
 import { PersistenceService } from "./persistence/user-layouts.js";
 import { SceneEligibilityService } from "./scene-eligibility.js";
 import { getSceneEnabled, setSceneEnabled } from "./scene-flags.js";
@@ -42,6 +43,7 @@ export function createRuntime({
   permissionService,
   tacticalStateService,
   tacticalUpdateService,
+  renderer,
   viewerApplicationClass = TacticalViewerApplication
 } = {}) {
   let initialized = false;
@@ -80,6 +82,10 @@ export function createRuntime({
       scheduler: synchronizationScheduler
     });
   const resolvedPersistenceService = persistenceService ?? new PersistenceService({ settings });
+  const resolvedRenderer = renderer ?? new Canvas2DRendererV1({
+    coordinateAdapter: resolvedCoordinateAdapter,
+    projectionEngine
+  });
   services.set("orientationAdapter", orientationAdapter);
   services.set("coordinateAdapter", resolvedCoordinateAdapter);
   services.set("elevationAdapter", resolvedElevationAdapter);
@@ -94,6 +100,7 @@ export function createRuntime({
   services.set("synchronization", resolvedSynchronizationCoordinator);
   services.set("sceneEligibility", sceneEligibility);
   services.set("settings", settings);
+  services.set("renderer", resolvedRenderer);
 
   return {
     get initialized() {
@@ -149,7 +156,9 @@ export function createRuntime({
         scene,
         viewRegistry,
         persistenceService: resolvedPersistenceService,
-        synchronizationCoordinator: resolvedSynchronizationCoordinator
+        synchronizationCoordinator: resolvedSynchronizationCoordinator,
+        tacticalStateService: resolvedTacticalStateService,
+        renderer: applicationConfiguration.renderer ?? resolvedRenderer
       });
 
       try {

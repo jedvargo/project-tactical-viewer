@@ -66,6 +66,7 @@ export class TacticalTokenState {
     return Object.freeze({
       tokenId: idOf(data) ?? idOf(tokenDocument),
       sceneId: idOf(scene),
+      name: typeof data.name === "string" ? data.name : "",
       anchor: coordinates.anchor,
       anchorTactical: coordinates.anchorTactical,
       centerX: coordinates.centerX,

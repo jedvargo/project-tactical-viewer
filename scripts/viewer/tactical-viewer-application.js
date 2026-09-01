@@ -103,6 +103,7 @@ export function createTacticalViewerApplicationClass({
         scene,
         persistenceService,
         synchronizationCoordinator,
+        tacticalStateService,
         viewRegistry = VIEW_REGISTRY,
         scheduler = defaultFrameScheduler,
         cancelScheduler = defaultFrameCanceller,
@@ -120,6 +121,7 @@ export function createTacticalViewerApplicationClass({
       this.scene = scene;
       this.persistenceService = persistenceService;
       this.synchronizationCoordinator = synchronizationCoordinator;
+      this.tacticalStateService = tacticalStateService;
       this.viewRegistry = viewRegistry;
       this.domDocument = document ?? documentFor({ document });
       this.scheduler = scheduler;
@@ -266,13 +268,18 @@ export function createTacticalViewerApplicationClass({
       if (!this.canvas) return false;
       const context = this.canvas.getContext?.("2d");
       context?.clearRect?.(0, 0, this.canvas.width, this.canvas.height);
-      this.renderer?.({
+      const renderInput = {
         canvas: this.canvas,
         context,
+        scene: this.scene,
         viewport: this.getViewportDimensions(),
         state: this.state,
+        devicePixelRatio: this.devicePixelRatio,
+        visibleTacticalStates: this.tacticalStateService?.getVisibleTacticalStates?.(this.scene) ?? [],
         invalidation: this.lastInvalidation
-      });
+      };
+      if (typeof this.renderer === "function") this.renderer(renderInput);
+      else this.renderer?.render?.(renderInput);
       this.renderCount += 1;
       return true;
     }

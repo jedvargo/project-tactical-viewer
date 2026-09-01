@@ -153,13 +153,14 @@ A prompt may be marked complete only after its focused tests, full automated sui
 - [x] Viewer opens without continuous repaint.
 
 ### P14 — Top renderer
-- [ ] Render tactical background/grid.
-- [ ] Render only visible participating tokens.
-- [ ] Correct token positions.
-- [ ] Render selection/orientation placeholders.
-- [ ] High-DPI backing store.
-- [ ] Viewport culling baseline.
-- [ ] First visible Top-view Foundry smoke test.
+- [x] Render tactical background/grid.
+- [x] Render only visible participating tokens.
+- [x] Correct token positions.
+- [x] Render selection/orientation placeholders.
+- [x] High-DPI backing store.
+- [x] Viewport culling baseline.
+- [!] First visible Top-view Foundry smoke test.
+  - Blocked: no installed or linked Foundry VTT v14 executable/test World was available for the required visual 1x1 and 2x2 token-center comparison; automated renderer and runtime coverage passed.
 
 ### P15 — Selection/pan/zoom
 - [ ] Local tactical selection.

@@ -203,6 +203,49 @@ export class CoordinateAdapter {
     return this.elevationAdapter.toTacticalZ(elevation, sceneOrDistance);
   }
 
+  /**
+   * Return the scene's square-grid line geometry in tactical cell units.
+   * Grid origin and extent discovery remain here so renderers do not repeat
+   * Foundry pixel/grid arithmetic.
+   */
+  getTopGrid(scene, { grid: explicitGrid } = {}) {
+    const { grid } = this.context(scene, explicitGrid);
+    const dimensions = scene?.dimensions && typeof scene.dimensions === "object"
+      ? scene.dimensions
+      : scene;
+    const width = dimensions?.width;
+    const height = dimensions?.height;
+    if (!positiveNumber(width) || !positiveNumber(height)) {
+      throw new CoordinateAdapterError("Scene dimensions must be positive for grid rendering.");
+    }
+
+    const origin = pointFromGrid(
+      "getTopLeftPoint",
+      grid.getTopLeftPoint({ i: 0, j: 0 })
+    );
+    const endOffset = grid.getOffset({
+      x: origin.x + width - EPSILON,
+      y: origin.y + height - EPSILON
+    });
+    const columns = Math.max(1, Math.floor(endOffset.i) + 1);
+    const rows = Math.max(1, Math.floor(endOffset.j) + 1);
+
+    return Object.freeze({
+      columns,
+      rows,
+      verticalLines: Object.freeze(Array.from({ length: columns + 1 }, (_, i) => Object.freeze({
+        x: i,
+        fromY: 0,
+        toY: rows
+      }))),
+      horizontalLines: Object.freeze(Array.from({ length: rows + 1 }, (_, j) => Object.freeze({
+        y: j,
+        fromX: 0,
+        toX: columns
+      })))
+    });
+  }
+
   toElevation(tacticalZ, sceneOrDistance) {
     return this.elevationAdapter.toElevation(tacticalZ, sceneOrDistance);
   }
