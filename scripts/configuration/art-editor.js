@@ -1,6 +1,7 @@
 import { MODULE_ID, VIEW_DEFINITIONS } from "../constants.js";
 import { getTokenArt } from "../model/token-flags.js";
 import { serializeTokenConfiguration } from "./configuration-controller.js";
+import { localize, viewLabel } from "../i18n.js";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -17,14 +18,14 @@ function field(name) {
 
 function viewInput(id, value) {
   const name = field(`art.views.${id}`);
-  return `<div class="form-group"><label>${escapeHtml(id)}</label><div class="form-fields"><input type="text" name="${name}" value="${escapeHtml(value)}"><button type="button" data-role="file-picker" data-field="${name}">Choose</button></div></div>`;
+  return `<div class="form-group"><label>${escapeHtml(viewLabel(id, id))}</label><div class="form-fields"><input type="text" name="${name}" value="${escapeHtml(value)}"><button type="button" data-role="file-picker" data-field="${name}">${escapeHtml(localize("configuration.token.choose", "Choose"))}</button></div></div>`;
 }
 
 export function buildAdvancedArtEditorContent(art = {}) {
   const normalized = getTokenArt({ flags: { [MODULE_ID]: { art } } });
   const northSouth = normalized.mirror.northSouth ? " checked" : "";
   const eastWest = normalized.mirror.eastWest ? " checked" : "";
-  return `<div data-role="tactical-art-editor"><p>Optional artwork for each fixed tactical view. The orientation vector remains authoritative.</p><div class="form-group"><label>Forward reference (degrees)</label><div class="form-fields"><input type="number" name="${field("art.forwardOffset")}" value="${escapeHtml(normalized.forwardOffset)}" step="1"></div></div><div class="form-group"><label>Mirror North/South</label><div class="form-fields"><input type="checkbox" name="${field("art.mirror.northSouth")}" value="on"${northSouth}></div></div><div class="form-group"><label>Mirror East/West</label><div class="form-fields"><input type="checkbox" name="${field("art.mirror.eastWest")}" value="on"${eastWest}></div></div>${VIEW_DEFINITIONS.map(({ id }) => viewInput(id, normalized.views[id])).join("")}</div>`;
+  return `<div data-role="tactical-art-editor"><p>${escapeHtml(localize("configuration.art.description", "Optional artwork for each fixed tactical view. The orientation vector remains authoritative."))}</p><div class="form-group"><label>${escapeHtml(localize("configuration.art.forwardReference", "Forward reference (degrees)"))}</label><div class="form-fields"><input type="number" name="${field("art.forwardOffset")}" value="${escapeHtml(normalized.forwardOffset)}" step="1"></div></div><div class="form-group"><label>${escapeHtml(localize("configuration.art.mirrorNorthSouth", "Mirror North/South"))}</label><div class="form-fields"><input type="checkbox" name="${field("art.mirror.northSouth")}" value="on"${northSouth}></div></div><div class="form-group"><label>${escapeHtml(localize("configuration.art.mirrorEastWest", "Mirror East/West"))}</label><div class="form-fields"><input type="checkbox" name="${field("art.mirror.eastWest")}" value="on"${eastWest}></div></div>${VIEW_DEFINITIONS.map(({ id }) => viewInput(id, normalized.views[id])).join("")}</div>`;
 }
 
 export function applyFilePickerResult(input, result) {
@@ -67,9 +68,9 @@ export async function editAdvancedArtConfiguration({
 } = {}) {
   if (typeof dialogInput !== "function") return null;
   const result = await dialogInput({
-    window: { title: "Advanced Tactical Art" },
+    window: { title: localize("configuration.token.advancedArt", "Advanced Tactical Art") },
     content: buildAdvancedArtEditorContent(art),
-    ok: { label: "Save" },
+    ok: { label: localize("configuration.art.save", "Save") },
     render: (_event, dialog) => attachFilePickers(dialog?.element, filePickerClass)
   });
   if (!result) return null;

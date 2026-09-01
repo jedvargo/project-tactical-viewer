@@ -8,7 +8,10 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "package:release": "node tools/build-release.js",
+    "verify:release": "node tools/verify-release.js",
+    "test:release": "npm run package:release && npm run verify:release"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

@@ -6,6 +6,7 @@ import { getSceneEnabled } from "../scene-flags.js";
 import { editAdvancedArtConfiguration } from "./art-editor.js";
 import { applyFilePickerResult } from "./art-editor.js";
 import { serializeTokenConfiguration } from "./configuration-controller.js";
+import { localize } from "../i18n.js";
 
 const RENDER_HOOK = "renderApplicationV2";
 
@@ -64,14 +65,19 @@ function namedValue(root, name) {
 function appendSceneConfiguration({ document, form, scene, sceneEligibility }) {
   const result = sceneEligibility.evaluate(scene);
   const section = create(document, "fieldset", { "data-role": "tactical-scene-config" });
-  section.appendChild(create(document, "legend", {}, "3D Tactical Viewer"));
+  section.appendChild(create(document, "legend", {}, localize("configuration.title", "3D Tactical Viewer")));
   const enabled = inputFor(document, "checkbox", "flags.tactical-3d-viewer.enabled", "true", {
     checked: getSceneEnabled(scene),
     disabled: !result.eligible
   });
-  appendField(document, section, "Enable 3D Tactical Viewer for this Scene", enabled);
+  appendField(document, section, localize(
+    "configuration.scene.enable",
+    "Enable 3D Tactical Viewer for this Scene"
+  ), enabled);
   const message = create(document, "p", { "data-role": "tactical-scene-eligibility" },
-    result.eligible ? "Square-grid tactical projection is available." : result.reason.message);
+    result.eligible
+      ? localize("configuration.scene.available", "Square-grid tactical projection is available.")
+      : localize(`sceneEligibility.${result.reason.code}`, result.reason.message));
   section.appendChild(message);
   form.appendChild(section);
 }
@@ -93,8 +99,11 @@ function appendTokenConfiguration({ document, form, token, kind, filePickerClass
     "data-role": "tactical-token-config",
     "data-token-kind": kind
   });
-  section.appendChild(create(document, "legend", {}, "3D Tactical Viewer"));
-  appendField(document, section, "Participate in 3D Tactical Viewer", inputFor(
+  section.appendChild(create(document, "legend", {}, localize("configuration.title", "3D Tactical Viewer")));
+  appendField(document, section, localize(
+    "configuration.token.participate",
+    "Participate in 3D Tactical Viewer"
+  ), inputFor(
     document, "checkbox", "flags.tactical-3d-viewer.enabled", "true", {
       checked: getTokenParticipation(token)
     }
@@ -106,18 +115,24 @@ function appendTokenConfiguration({ document, form, token, kind, filePickerClass
     pitch.appendChild(option);
   }
   pitch.value = String(orientationAdapter.snapPitch(getTokenPitch(token)));
-  appendField(document, section, "Pitch", pitch);
+  appendField(document, section, localize("configuration.token.pitch", "Pitch"), pitch);
 
   const preset = create(document, "select", { name: "flags.tactical-3d-viewer.art.preset" });
   for (const [value, label] of [["generic-ship", "Generic Ship"], ["generic-object", "Generic Object"], ["generic-creature", "Generic Creature"], ["generic-marker", "Generic Marker"]]) {
-    preset.appendChild(create(document, "option", { value }, label));
+    preset.appendChild(create(document, "option", { value }, localize(`configuration.presets.${value}`, label)));
   }
   preset.value = art.preset;
-  appendField(document, section, "Generic art preset", preset);
+  appendField(document, section, localize("configuration.token.genericPreset", "Generic art preset"), preset);
 
   const icon = inputFor(document, "text", "flags.tactical-3d-viewer.art.icon", art.icon);
-  const iconGroup = appendField(document, section, "Primary custom tactical icon", icon);
-  const choose = create(document, "button", { type: "button", "data-role": "choose-primary-art" }, "Choose");
+  const iconGroup = appendField(document, section, localize(
+    "configuration.token.customIcon",
+    "Primary custom tactical icon"
+  ), icon);
+  const choose = create(document, "button", { type: "button", "data-role": "choose-primary-art" }, localize(
+    "configuration.token.choose",
+    "Choose"
+  ));
   iconGroup.children[1].appendChild(choose);
   choose.addEventListener("click", () => {
     const Picker = filePickerClass
@@ -129,7 +144,10 @@ function appendTokenConfiguration({ document, form, token, kind, filePickerClass
   });
 
   addHiddenArtFields(document, section, art);
-  const advanced = create(document, "button", { type: "button", "data-role": "configure-advanced-art" }, "Configure advanced view art…");
+  const advanced = create(document, "button", { type: "button", "data-role": "configure-advanced-art" }, localize(
+    "configuration.token.advancedArt",
+    "Configure advanced view art…"
+  ));
   section.appendChild(advanced);
   advanced.addEventListener("click", async () => {
     const currentArt = serializeTokenConfiguration(section, { fallbackArt: art }).art;

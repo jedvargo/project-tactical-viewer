@@ -331,16 +331,20 @@ A prompt may be marked complete only after its focused tests, full automated sui
   - Blocked: no linked or installed Foundry VTT v14 executable or test World was available for the required client lifecycle and native-operation check; automated Foundry-shaped coverage passed.
 
 ### P30 — Release candidate
-- [ ] Complete localization keys.
-- [ ] Complete `module.json` metadata/compatibility.
-- [ ] README install/use/limitations.
-- [ ] manual Foundry smoke checklist complete.
-- [ ] multi-client checklist complete.
-- [ ] full spec acceptance matrix complete.
-- [ ] no runtime dependencies.
-- [ ] no debug output/test hooks in production path.
-- [ ] package/install smoke test from release ZIP.
-- [ ] Gate 6 passed.
+- [x] Complete localization keys.
+- [x] Complete `module.json` metadata/compatibility.
+- [x] README install/use/limitations.
+- [!] manual Foundry smoke checklist complete.
+  - Blocked: no linked or installed Foundry VTT v14 executable or test World was available; the executable-free checklist is at `tests/manual/foundry-acceptance.md`.
+- [!] multi-client checklist complete.
+  - Blocked: no linked or installed Foundry VTT v14 two-client test environment was available; the checklist is ready at `tests/manual/foundry-acceptance.md`.
+- [!] full spec acceptance matrix complete.
+  - Blocked: the real Foundry portion of the matrix requires a Foundry v14 World; automated coverage and the executable-free release audit passed.
+- [x] no runtime dependencies.
+- [x] no debug output/test hooks in production path.
+- [x] package/install smoke test from release ZIP.
+- [!] Gate 6 passed.
+  - Blocked: Gate 6 requires the real Foundry v14 acceptance matrix; `npm run test:release` passed the clean ZIP/package boundary checks.
 
 ---
 

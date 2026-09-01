@@ -30,10 +30,7 @@ import {
   writeTokenConfiguration
 } from "./configuration/configuration-controller.js";
 
-/**
- * Minimal composition root. Later prompts attach concrete services through
- * this object; no service is invented before it has an implementation.
- */
+/** Compose the runtime services used by the release module entrypoint. */
 export function createRuntime({
   viewRegistry = VIEW_REGISTRY,
   orientationAdapter = new OrientationAdapter(),
@@ -345,17 +342,6 @@ export function createRuntime({
 
     getViewerApplication() {
       return activeViewer ?? null;
-    },
-
-    attachService(name, service) {
-      if (typeof name !== "string" || !name) {
-        throw new TypeError("A runtime service requires a name");
-      }
-      if (services.has(name)) {
-        throw new Error(`Runtime service already attached: ${name}`);
-      }
-      services.set(name, service);
-      return service;
     },
 
     getService(name) {

@@ -3,6 +3,12 @@
   "title": "3D Tactical Viewer",
   "description": "Synchronized 2D tactical projections for three-dimensional battlespaces.",
   "version": "0.1.0",
+  "authors": [
+    {
+      "name": "3D Tactical Viewer Contributors"
+    }
+  ],
+  "readme": "README.md",
   "compatibility": {
     "minimum": "14",
     "verified": "14",
@@ -10,6 +16,13 @@
   },
   "styles": [
     "styles/tactical-viewer.css"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
   ],
   "esmodules": [
     "scripts/main.js"

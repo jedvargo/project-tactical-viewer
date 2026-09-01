@@ -5,6 +5,7 @@ import {
   AssetManager,
   getTacticalArtCandidates
 } from "./asset-manager.js";
+import { localize, localizeFormat } from "../i18n.js";
 
 const DEFAULT_BACKGROUND = "#111820";
 const DEFAULT_GRID = "rgba(151, 183, 204, 0.34)";
@@ -865,7 +866,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       context.fillText?.(model.axisLabels.horizontal, 8, Math.max(14, height - 8));
       context.fillText?.(model.axisLabels.vertical, 8, 14);
       const depthLabel = model.axisLabels.hidden ?? model.axisLabels.depth ?? "";
-      context.fillText?.(`Hidden: ${depthLabel}`, Math.max(8, width - 132), 14);
+      context.fillText?.(localizeFormat("renderer.hidden", `Hidden: ${depthLabel}`, { axis: depthLabel }), Math.max(8, width - 132), 14);
     }
     if (transform) context.restore?.();
   }
@@ -960,21 +961,27 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       const labelY = point.y - markerRadius;
       if (model.overlays.names && token.name) context.fillText?.(token.name, labelX, labelY);
       if (model.overlays.elevation) {
-        context.fillText?.(`Z ${formatSigned(token.tacticalZ)}`, labelX, labelY + 14);
+        context.fillText?.(localizeFormat("renderer.elevation", `Z ${formatSigned(token.tacticalZ)}`, {
+          value: formatSigned(token.tacticalZ)
+        }), labelX, labelY + 14);
       }
       if (model.overlays.heading) {
-        context.fillText?.(`H ${String(token.heading).padStart(3, "0")}°`, labelX, labelY + 28);
+        context.fillText?.(localizeFormat("renderer.heading", `H ${String(token.heading).padStart(3, "0")}°`, {
+          value: String(token.heading).padStart(3, "0")
+        }), labelX, labelY + 28);
       }
       if (model.overlays.pitch) {
-        context.fillText?.(`P ${formatSigned(token.pitch)}°`, labelX, labelY + 42);
+        context.fillText?.(localizeFormat("renderer.pitch", `P ${formatSigned(token.pitch)}°`, {
+          value: formatSigned(token.pitch)
+        }), labelX, labelY + 42);
       }
-      if (token.offGrid) context.fillText?.("OFF GRID", labelX, labelY + 56);
+      if (token.offGrid) context.fillText?.(localize("renderer.offGrid", "OFF GRID"), labelX, labelY + 56);
     }
 
     for (const stack of model.stacks ?? []) {
       context.fillStyle = this.colors.text ?? DEFAULT_TEXT;
       context.font = "bold 12px sans-serif";
-      context.fillText?.(`x${stack.count}`,
+      context.fillText?.(localizeFormat("renderer.stackCount", `x${stack.count}`, { count: stack.count }),
         stack.point.x + stack.markerRadius,
         stack.point.y - stack.markerRadius);
     }

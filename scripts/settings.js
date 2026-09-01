@@ -1,5 +1,6 @@
 import { MODULE_ID } from "./constants.js";
 import { DEFAULT_USER_LAYOUT } from "./persistence/migrations.js";
+import { localize } from "./i18n.js";
 
 export const USER_LAYOUT_SETTING_KEY = "userLayout";
 export const AUTO_OPEN_SETTING_KEY = "autoOpen";
@@ -58,7 +59,18 @@ export function registerSettings(settings) {
   if (!settings || typeof settings.register !== "function") return false;
 
   for (const { key, config } of SETTING_DEFINITIONS) {
-    settings.register(MODULE_ID, key, config);
+    const localized = {
+      ...config,
+      name: localize(`settings.${key}.name`, config.name),
+      hint: localize(`settings.${key}.hint`, config.hint)
+    };
+    if (config.choices) {
+      localized.choices = Object.fromEntries(Object.entries(config.choices).map(([choice, label]) => [
+        choice,
+        localize(`settings.renderQuality.${choice}`, label)
+      ]));
+    }
+    settings.register(MODULE_ID, key, localized);
   }
   return true;
 }
