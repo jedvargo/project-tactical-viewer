@@ -32,10 +32,10 @@ describe("release candidate artifacts", () => {
     for (const heading of [
       "Install",
       "Enable a Scene",
-      "Configure tactical tokens",
+      "Tactical tokens",
       "Panels and links",
       "Movement and orientation",
-      "Custom art",
+      "Token art",
       "Limitations",
       "Troubleshooting",
       "Privacy and security",

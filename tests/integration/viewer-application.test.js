@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createTacticalViewerApplicationClass
+  createTacticalViewerApplicationClass,
+  getSideControlInsets
 } from "../../scripts/viewer/tactical-viewer-application.js";
 
 class FakeElement {
@@ -12,7 +13,10 @@ class FakeElement {
     this.parentElement = null;
     this.attributes = new Map();
     this.dataset = {};
-    this.style = {};
+    this.style = {
+      setProperty: (name, value) => { this.style[name] = String(value); },
+      getPropertyValue: (name) => this.style[name] ?? ""
+    };
     this.listeners = new Map();
     this.classList = {
       values: new Set(),
@@ -355,6 +359,147 @@ describe("TacticalViewerApplication", () => {
     expect(saved.splits).toEqual([0.28125, 0.5]);
   });
 
+  it("persists grid controls and display mode without changing the Scene", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const saveSceneLayout = vi.fn(async (_sceneId, layout) => layout);
+    const scene = { ...createScene(), dimensions: { width: 1200, height: 800 } };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene,
+      persistenceService: {
+        getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }),
+        saveSceneLayout
+      },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    await application.setPanelGridOpacity(0, 0.3);
+    await application.setGridDimensions(12, 8);
+    await application.setDisplayMode("scene");
+
+    expect(application.viewerState.panels[0].overlays.gridOpacity).toBe(0.3);
+    expect(application.viewerState.gridDimensions).toEqual({ x: 12, y: 8, z: 10 });
+    expect(application.viewerState.displayMode).toBe("scene");
+    expect(scene.dimensions).toEqual({ width: 1200, height: 800 });
+    expect(saveSceneLayout.mock.calls.at(-1)[1]).toMatchObject({
+      gridDimensions: { x: 12, y: 8, z: 10 },
+      displayMode: "scene"
+    });
+    expect(saveSceneLayout.mock.calls.at(-1)[1].panels[0].overlays.gridOpacity).toBe(0.3);
+  });
+
+  it("keeps the maximized replacement grid clear of Foundry side controls", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const controls = document.createElement("div");
+    controls._rect = { left: 0, right: 64, top: 80, bottom: 700, width: 64, height: 620 };
+    const sidebar = document.createElement("div");
+    sidebar._rect = { left: 900, right: 1200, top: 0, bottom: 800, width: 300, height: 800 };
+    vi.stubGlobal("ui", { controls: { element: controls }, sidebar: { element: sidebar } });
+    vi.stubGlobal("innerWidth", 1200);
+    vi.stubGlobal("innerHeight", 800);
+
+    expect(getSideControlInsets(document)).toEqual({ left: 72, right: 308, top: 0, bottom: 0 });
+
+    class PositionedApplicationV2 extends FakeApplicationV2 {
+      setPosition(position) {
+        this.position = { ...(this.position ?? {}), ...position };
+      }
+    }
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: PositionedApplicationV2 });
+    const application = new Application({
+      scene: { ...createScene(), dimensions: { width: 2000, height: 1200 } },
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    await application.setDisplayMode("replace");
+
+    expect(application.element.style.getPropertyValue("--tactical-side-left")).toBe("72px");
+    expect(application.element.style.getPropertyValue("--tactical-side-right")).toBe("308px");
+
+    await application.setDisplayMode("scene");
+    expect(application.position).toMatchObject({ left: 72, width: 820, height: 800 });
+
+    sidebar._rect = { left: 1000, right: 1200, top: 0, bottom: 800, width: 200, height: 800 };
+    FakeResizeObserver.instances.find((observer) => observer.element === sidebar)?.trigger(0, 0);
+    expect(application.element.style.getPropertyValue("--tactical-side-right")).toBe("208px");
+  });
+
+  it("creates a snapped TokenDocument when an icon is dropped on an orthographic panel", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const created = [];
+    const scene = {
+      ...createScene(),
+      createEmbeddedDocuments: vi.fn(async (type, records) => {
+        created.push({ type, records });
+        return records;
+      }),
+      canUserModify: vi.fn(() => true)
+    };
+    const renderer = {
+      buildModel: vi.fn(() => ({
+        view: "top",
+        camera: {
+          view: "top",
+          focus: { x: 3, y: 2, z: 0 },
+          scale: 100,
+          screenCenter: { x: 320, y: 180 }
+        }
+      })),
+      render: vi.fn()
+    };
+    const coordinateAdapter = {
+      toTokenPosition: vi.fn(() => ({ x: 200, y: 100 })),
+      toElevation: vi.fn(() => 0)
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene,
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      coordinateAdapter,
+      renderer,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    vi.stubGlobal("game", { user: { isGM: true } });
+    await application.render(true);
+    const canvas = application.element.querySelector("canvas");
+    const result = await application.handleViewerDrop({
+      target: canvas,
+      clientX: 320,
+      clientY: 180,
+      preventDefault: vi.fn(),
+      dataTransfer: {
+        getData: () => JSON.stringify({ type: "Image", src: "icons/ship.webp" })
+      }
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(created[0].type).toBe("Token");
+    expect(created[0].records[0]).toMatchObject({
+      x: 200,
+      y: 100,
+      elevation: 0,
+      texture: { src: "icons/ship.webp" }
+    });
+    expect(coordinateAdapter.toTokenPosition).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("offers every fixed projection view, including all four isometrics", async () => {
     const scheduler = createScheduler();
     const document = createFakeDocument();
@@ -675,7 +820,58 @@ describe("TacticalViewerApplication", () => {
     expect(tacticalUpdateService.setHeading).toHaveBeenCalledOnce();
   });
 
-  it("exposes all five North pitch values and commits the selected value", async () => {
+  it("exposes selected token width and height controls and commits a 2x1 footprint", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const tokenDocument = { id: "ship", width: 1, height: 1 };
+    const tacticalUpdateService = {
+      captureSizeSnapshot: vi.fn(() => ({ width: 1, height: 1 })),
+      setSize: vi.fn(async () => ({ status: "accepted", ok: true }))
+    };
+    const tacticalStateService = {
+      getVisibleTacticalStates: vi.fn(() => [{
+        tokenId: "ship",
+        width: 1,
+        height: 1,
+        visibleToCurrentUser: true,
+        canCurrentUserUpdate: true
+      }])
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: { ...createScene(), tokens: [tokenDocument] },
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      tacticalStateService,
+      tacticalUpdateService,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    application.viewerState.selectedTokenId = "ship";
+    application.updateInteractionControls();
+    const width = application.element.querySelector('[data-role="token-width"]');
+    const height = application.element.querySelector('[data-role="token-height"]');
+
+    expect(width).not.toBeNull();
+    expect(height).not.toBeNull();
+    expect(width.disabled).toBe(false);
+    width.value = "2";
+    height.value = "1";
+    width.dispatchEvent({ type: "change" });
+
+    expect(tacticalUpdateService.captureSizeSnapshot).toHaveBeenCalledWith(tokenDocument);
+    expect(tacticalUpdateService.setSize).toHaveBeenCalledWith(
+      tokenDocument,
+      "2",
+      "1",
+      { width: 1, height: 1 }
+    );
+  });
+
+  it("exposes pitch step buttons and commits the selected value", async () => {
     const scheduler = createScheduler();
     const document = createFakeDocument();
     const tokenDocument = {
@@ -736,17 +932,14 @@ describe("TacticalViewerApplication", () => {
     application.viewerState.selectedTokenId = "ship";
     application.updateInteractionControls();
 
-    const pitchSelect = application.element.querySelector('[data-role="pitch-select"]');
-    expect(pitchSelect).not.toBeNull();
-    expect(pitchSelect.children.map((option) => Number(option.value))).toEqual([
-      90, 45, 0, -45, -90
-    ]);
-    pitchSelect.value = "-90";
-    pitchSelect.dispatchEvent({ type: "change" });
+    expect(application.element.querySelector('[data-role="pitch-select"]')).toBeNull();
+    const pitchPrevious = application.element.querySelector('[data-role="pitch-previous"]');
+    expect(pitchPrevious).not.toBeNull();
+    pitchPrevious.dispatchEvent({ type: "click" });
 
     expect(tacticalUpdateService.setPitch).toHaveBeenCalledWith(
       tokenDocument,
-      -90,
+      45,
       expect.any(Object)
     );
   });
@@ -806,10 +999,10 @@ describe("TacticalViewerApplication", () => {
     expect(application.element.classList.contains("tactical-viewer-reduced-motion")).toBe(true);
     expect(application.element.dataset.reducedMotion).toBe("true");
     for (const role of [
-      "panel-count", "view-select", "zoom-out", "zoom-in", "reset-view",
+      "panel-count", "view-select", "zoom-out", "zoom-in", "reset-view", "center-view",
       "move-left", "move-right", "move-up", "move-down", "z-decrease", "z-increase",
       "heading-decrease", "heading-increase", "pitch-previous", "pitch-next",
-      "pitch-select", "panel-options"
+      "panel-options", "shared-options-button"
     ]) {
       const controls = application.element.querySelectorAll(`[data-role="${role}"]`);
       expect(controls.length).toBeGreaterThan(0);

@@ -21,13 +21,13 @@ Scenes with positive grid size, grid distance, and dimensions can be enabled.
 Use `Ctrl+Shift+V` (customizable in Foundry Keybindings) to reopen the viewer
 after closing it. Scene enablement is shared; the viewer layout is per user.
 
-## Configure tactical tokens
+## Tactical tokens
 
-In Token Configuration, enable **Participate in 3D Tactical Viewer**, choose a
-pitch, and optionally choose a generic preset or custom tactical icon. Advanced
-art configuration provides an icon for each fixed view, a forward reference,
-and opt-in mirroring for North/South or East/West. Artwork is schematic identity
-art; the heading/pitch orientation vector remains authoritative.
+Tokens use their native Foundry texture, name, footprint, elevation, and
+orientation. Token-specific Tactical Viewer configuration is not added to Token
+Configuration; dropped Actors and images become real TokenDocuments on the
+active tactical grid. Artwork is rendered as identity art while the
+heading/pitch orientation vector remains authoritative.
 
 ## Panels and links
 
@@ -35,6 +35,22 @@ Choose 1, 2, 3, or 4 panels. Each visible panel independently selects Top,
 North, South, East, West, Isometric NE, Isometric SE, Isometric SW, or
 Isometric NW. Duplicate views are allowed and hidden panel settings are
 retained. Resizable splitters adapt to narrow windows.
+
+Panel Options includes a grid-opacity slider. The shared Options menu can set
+the tactical grid X/Y/Z dimensions, background color or image, and choose
+whether the viewer remains a normal window, sizes itself to the Scene, or fills
+the viewport to replace the Scene presentation. These are user-local per-Scene
+preferences. Token artwork is rendered in isometric panels as well as
+orthographic panels.
+
+Actors and supported token/image drag payloads can be dropped onto any
+orthographic panel. The drop is snapped to the tactical grid and creates a
+real TokenDocument in the active Scene. Isometric panels are read-only drop
+surfaces because a 2D drop cannot uniquely determine all three coordinates.
+Actor drops preserve the Actor's token prototype footprint. Panel Options also
+provide selected-token width and height controls from 1 to 20 squares, so a
+ship can occupy a rectangular footprint such as 2x1. The footprint is used by
+all projections and image drops default to 1x1 unless dimensions are supplied.
 
 The three user-local links are **Link Selection**, **Link Center**, and
 **Link Zoom**. Turn any link off to navigate that panel independently.
@@ -51,12 +67,11 @@ are synchronized by Foundry. Isometric panels are read-only for movement; use
 an orthographic panel to move a token. Rendering and hooks never write token
 state.
 
-## Custom art
+## Token art
 
-Custom art is loaded lazily with a generic fallback. A broken or missing image
-never removes a token from the viewer. Per-view overrides take precedence,
-followed by explicitly permitted mirroring, the single custom icon, the chosen
-generic preset, and the generic marker.
+Native Token textures are loaded lazily. A broken or missing image never
+removes a token from the viewer; the footprint remains represented until the
+texture is available.
 
 ## Limitations
 
@@ -73,8 +88,9 @@ generic preset, and the generic marker.
 
 - If the viewer will not open, confirm the Scene is active, enabled, square-grid,
   and has positive grid size, grid distance, width, and height.
-- If a token is absent, confirm participation and Foundry visibility; a player
-  cannot see a token that Foundry hides or places outside permitted vision.
+- If a token is absent, confirm the native texture and Foundry visibility; a
+  player cannot see a token that Foundry hides or places outside permitted
+  vision.
 - If movement controls are disabled, check token ownership/update permission,
   movement/rotation locks, and whether the selected panel is isometric.
 - If art is absent, verify the file path is readable by the client. The generic
@@ -85,9 +101,9 @@ generic preset, and the generic marker.
 
 ## Privacy and security
 
-The module stores shared enablement in Scene flags, shared tactical token
-configuration in TokenDocument/prototype-token flags, and layout preferences in
-the Foundry user setting. Rendering preferences are client-scoped. It does not
+The module stores shared enablement in Scene flags, legacy tactical token
+compatibility flags in TokenDocuments, and layout preferences in the Foundry
+user setting. Rendering preferences are client-scoped. It does not
 send data to an external service, create duplicate Scenes, or store a second
 authoritative position. The custom renderer applies Foundry's current-user
 visibility and permission results to sprites, names, labels, hit testing,

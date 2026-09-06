@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   Canvas2DRendererV1,
+  createIsometricRenderModel,
   createNorthRenderModel,
   createSouthRenderModel,
   createTopRenderModel
@@ -86,6 +87,81 @@ function renderInput(states, overrides = {}) {
 }
 
 describe("Canvas2DRendererV1", () => {
+  it("supports custom grid dimensions and opacity in every projection", () => {
+    const model = createIsometricRenderModel({
+      view: "iso-ne",
+      scene: scene(),
+      tacticalStates: [],
+      viewport: { width: 600, height: 400 },
+      zoom: 20,
+      focus: { x: 1.5, y: 1, z: 0 },
+      gridDimensions: { columns: 3, rows: 2 },
+      overlays: { gridOpacity: 0.25 }
+    });
+
+    expect(model.grid.columns).toBe(3);
+    expect(model.grid.rows).toBe(2);
+    expect(model.overlays.gridOpacity).toBe(0.25);
+    expect(model.grid.lines.length).toBeGreaterThan(0);
+  });
+
+  it("draws the configured tactical icon in an isometric panel", () => {
+    const image = { source: "ship.webp" };
+    const assetManager = {
+      peekArt: vi.fn(() => ({ image, mirrored: false, forwardOffset: 0 })),
+      loadArt: vi.fn()
+    };
+    const model = createIsometricRenderModel({
+      view: "iso-ne",
+      scene: scene(),
+      tacticalStates: [state({ art: { icon: "ship.webp" } })],
+      viewport: { width: 600, height: 400 },
+      zoom: 40,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+    const context = fakeContext();
+
+    new Canvas2DRendererV1({ assetManager }).render({
+      canvas: { width: 600, height: 400 },
+      context,
+      viewport: { width: 600, height: 400 },
+      model
+    });
+
+    expect(assetManager.peekArt).toHaveBeenCalledWith(model.tokens[0].art, "iso-ne");
+    expect(context.calls.some(([name, value]) => name === "drawImage" && value === image)).toBe(true);
+  });
+
+  it("renders a rectangular token footprint across the grid", () => {
+    const image = { source: "ship.webp" };
+    const model = createTopRenderModel({
+      scene: scene(),
+      tacticalStates: [state({ width: 2, height: 1, art: { icon: "ship.webp" } })],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+    const context = fakeContext();
+
+    new Canvas2DRendererV1({
+      assetManager: { peekArt: () => ({ image, mirrored: false }), loadArt: vi.fn() }
+    }).render({
+      canvas: { width: 600, height: 400 },
+      context,
+      viewport: { width: 600, height: 400 },
+      model
+    });
+
+    expect(model.tokens[0]).toMatchObject({
+      width: 2,
+      height: 1,
+      footprintWidth: 200,
+      footprintHeight: 100,
+      multiCell: true
+    });
+    expect(context.calls).toContainEqual(["drawImage", image, -100, -50, 200, 100]);
+  });
+
   it("loads only visible token presets and keeps the generated marker and vector when images fail", async () => {
     const imageFactory = vi.fn(async () => {
       throw new Error("asset unavailable");

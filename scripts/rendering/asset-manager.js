@@ -105,11 +105,17 @@ function defaultImageFactory() {
 function defaultResolvePath(source) {
   if (/^(?:[a-z][a-z\d+.-]*:|\/\/|\/)/i.test(source)) return source;
 
-  const moduleUrl = globalThis?.game?.modules?.get?.(MODULE_ID)?.url;
-  if (typeof moduleUrl === "string" && moduleUrl) {
-    return new URL(source, moduleUrl.endsWith("/") ? moduleUrl : `${moduleUrl}/`).href;
+  // Module-owned fallback art is relative to the module manifest, while a
+  // native Token texture is relative to Foundry's current document URL.
+  if (source.startsWith("assets/")) {
+    const moduleUrl = globalThis?.game?.modules?.get?.(MODULE_ID)?.url;
+    if (typeof moduleUrl === "string" && moduleUrl) {
+      return new URL(source, moduleUrl.endsWith("/") ? moduleUrl : `${moduleUrl}/`).href;
+    }
   }
 
+  const locationUrl = globalThis?.location?.href;
+  if (typeof locationUrl === "string" && locationUrl) return new URL(source, locationUrl).href;
   return new URL(`../../${source}`, import.meta.url).href;
 }
 

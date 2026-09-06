@@ -32,6 +32,82 @@ function dimensionsOf(viewport) {
   };
 }
 
+function tokenDimensions(state) {
+  return {
+    width: Math.max(1, positiveOr(state?.width, 1)),
+    height: Math.max(1, positiveOr(state?.height, 1))
+  };
+}
+
+function projectedFootprint({ state, projectionEngine, camera, definition }) {
+  const { width, height } = tokenDimensions(state);
+  // Preserve the established compact marker for 1x1 tokens. Larger tokens
+  // use their real cell footprint so rectangular ships remain recognizable.
+  const baseSize = Math.max(8, camera.scale * 0.24);
+  if (width === 1 && height === 1) return { width: baseSize, height: baseSize };
+
+  if (definition.basis) {
+    const corners = [
+      { x: state.tacticalX - width / 2, y: state.tacticalY - height / 2, z: state.tacticalZ },
+      { x: state.tacticalX + width / 2, y: state.tacticalY - height / 2, z: state.tacticalZ },
+      { x: state.tacticalX - width / 2, y: state.tacticalY + height / 2, z: state.tacticalZ },
+      { x: state.tacticalX + width / 2, y: state.tacticalY + height / 2, z: state.tacticalZ }
+    ].map((corner) => projectionEngine.projectPoint(corner, camera));
+    return {
+      width: Math.max(baseSize, Math.max(...corners.map(({ x }) => x)) - Math.min(...corners.map(({ x }) => x))),
+      height: Math.max(baseSize, Math.max(...corners.map(({ y }) => y)) - Math.min(...corners.map(({ y }) => y)))
+    };
+  }
+
+  const isTop = definition.visibleAxes.includes("x") && definition.visibleAxes.includes("y");
+  if (isTop) {
+    return {
+      width: Math.max(baseSize, width * camera.scale),
+      height: Math.max(baseSize, height * camera.scale)
+    };
+  }
+
+  const horizontalCells = definition.horizontal.axis === "x" ? width : height;
+  return {
+    width: Math.max(baseSize, horizontalCells * camera.scale),
+    height: baseSize
+  };
+}
+
+function normalizedGridDimensions(value) {
+  const columns = Number(value?.x ?? value?.columns);
+  const rows = Number(value?.y ?? value?.rows);
+  const depth = Number(value?.z ?? value?.depth ?? 10);
+  if (!Number.isInteger(columns) || columns < 1 || columns > 200
+    || !Number.isInteger(rows) || rows < 1 || rows > 200
+    || !Number.isInteger(depth) || depth < 1 || depth > 200) return null;
+  return { columns, rows, z: depth };
+}
+
+function gridWithDimensions(grid, dimensions) {
+  const next = normalizedGridDimensions(dimensions);
+  if (!next) return grid;
+  return Object.freeze({
+    ...grid,
+    x: next.columns,
+    y: next.rows,
+    z: next.z,
+    columns: next.columns,
+    rows: next.rows,
+    depth: next.z,
+    verticalLines: Object.freeze(Array.from({ length: next.columns + 1 }, (_, index) => Object.freeze({
+      x: index,
+      fromY: 0,
+      toY: next.rows
+    }))),
+    horizontalLines: Object.freeze(Array.from({ length: next.rows + 1 }, (_, index) => Object.freeze({
+      y: index,
+      fromX: 0,
+      toX: next.columns
+    })))
+  });
+}
+
 function formatSigned(value) {
   return value > 0 ? `+${value}` : String(value);
 }
@@ -61,12 +137,21 @@ function cameraForTop({ grid, viewport, zoom, focus, pan }) {
   };
 }
 
-function zBounds(tacticalStates = []) {
+function zBounds(tacticalStates = [], configuredDepth) {
   const levels = tacticalStates
     .map((state) => state?.tacticalZ)
     .filter((value) => typeof value === "number" && Number.isFinite(value));
   const minimum = Math.min(0, ...(levels.length ? levels : [0]));
-  const maximum = Math.max(0, ...(levels.length ? levels : [0]));
+  const configuredMaximum = Number.isInteger(configuredDepth) && configuredDepth > 0
+    ? configuredDepth
+    : 0;
+  const maximum = Math.max(configuredMaximum, ...(levels.length ? levels : [0]));
+  if (configuredMaximum > 0) {
+    return {
+      min: Math.floor(minimum),
+      max: Math.ceil(maximum)
+    };
+  }
   return {
     min: Math.floor(minimum) - 2,
     max: Math.ceil(maximum) + 2
@@ -75,7 +160,7 @@ function zBounds(tacticalStates = []) {
 
 function cameraForIsometric({ definition, grid, viewport, zoom, focus, pan, tacticalStates }) {
   const { width, height } = dimensionsOf(viewport);
-  const bounds = zBounds(tacticalStates);
+  const bounds = zBounds(tacticalStates, grid.depth);
   const defaultFocus = {
     x: grid.columns / 2,
     y: grid.rows / 2,
@@ -129,7 +214,7 @@ function cameraForOrthographic({ definition, grid, viewport, zoom, focus, pan, t
   const horizontalExtent = horizontalAxis === "x" ? grid.columns : grid.rows;
   if (isTop) return cameraForTop({ grid, viewport, zoom, focus, pan });
 
-  const bounds = zBounds(tacticalStates);
+  const bounds = zBounds(tacticalStates, grid.depth);
   const fitScale = Math.min(
     width / Math.max(1, horizontalExtent),
     height / Math.max(1, bounds.max - bounds.min)
@@ -241,7 +326,7 @@ function projectedIsometricGrid({ grid, camera, projectionEngine, zRange }) {
   });
 }
 
-function staticKeyFor({ sceneId, view, camera, grid, width, height, dpr, gridOverlay }) {
+function staticKeyFor({ sceneId, view, camera, grid, width, height, dpr, gridOverlay, gridOpacity, background }) {
   return [
     sceneId,
     view,
@@ -258,7 +343,10 @@ function staticKeyFor({ sceneId, view, camera, grid, width, height, dpr, gridOve
     width,
     height,
     dpr,
-    gridOverlay
+    gridOverlay,
+    gridOpacity,
+    background?.color,
+    background?.image
   ].join(":");
 }
 
@@ -271,7 +359,9 @@ function staticKey(model, width, height, dpr) {
     width,
     height,
     dpr,
-    gridOverlay: model.overlays.grid
+    gridOverlay: model.overlays.grid,
+    gridOpacity: model.overlays.gridOpacity,
+    background: model.background
   });
 }
 
@@ -298,10 +388,8 @@ function visibleToken(state, projectionEngine, camera, viewport, definition, sel
     z: state.tacticalZ
   };
   const point = projectionEngine.projectPoint(worldPoint, camera);
-  const markerRadius = Math.max(
-    4,
-    Math.min(positiveOr(state.width, 1), positiveOr(state.height, 1)) * camera.scale * 0.12
-  );
+  const footprint = projectedFootprint({ state, projectionEngine, camera, definition });
+  const markerRadius = Math.max(4, footprint.width / 2, footprint.height / 2);
   const { width, height } = dimensionsOf(viewport);
   if (point.x + markerRadius < 0 || point.x - markerRadius > width
     || point.y + markerRadius < 0 || point.y - markerRadius > height) return null;
@@ -315,7 +403,9 @@ function visibleToken(state, projectionEngine, camera, viewport, definition, sel
     { ...camera, scale: 1 }
   );
   const artDirectionLength = Math.hypot(artDirection.x, artDirection.y);
-  const forwardOffset = finiteOr(state.art?.forwardOffset, 0) * Math.PI / 180;
+  const forwardOffset = state.textureSource
+    ? 0
+    : finiteOr(state.art?.forwardOffset, 0) * Math.PI / 180;
   const artRotation = artDirectionLength > 1e-9
     ? Math.atan2(artDirection.y, artDirection.x) + Math.PI / 2 - forwardOffset
     : -forwardOffset;
@@ -337,7 +427,11 @@ function visibleToken(state, projectionEngine, camera, viewport, definition, sel
     lockRotation: state.lockRotation === true,
     preview: state.preview === true,
     offGrid: state.offGrid === true,
-    art: state.art,
+    // Native Token texture is authoritative. Legacy Tactical Viewer art flags
+    // are deliberately not allowed to replace the document's real token.
+    art: state.textureSource
+      ? { icon: state.textureSource, preset: "generic-marker", forwardOffset: 0 }
+      : state.art,
     artRotation,
     worldPoint: Object.freeze(worldPoint),
     depthKey: definition.basis ? projectionEngine.depthKey(worldPoint, camera) : null,
@@ -347,6 +441,9 @@ function visibleToken(state, projectionEngine, camera, viewport, definition, sel
     point,
     orientation,
     markerRadius,
+    footprintWidth: footprint.width,
+    footprintHeight: footprint.height,
+    multiCell: tokenDimensions(state).width > 1 || tokenDimensions(state).height > 1,
     selected: selectedTokenId !== null && state.tokenId === selectedTokenId
   };
 }
@@ -473,11 +570,18 @@ function createOrthographicRenderModel({
   selectedTokenId = null,
   movementPreview = null,
   staticGridProvider,
-  gridGeometry
+  gridGeometry,
+  gridDimensions,
+  background
 } = {}) {
   const definition = projectionEngine.describe(view);
-  const tacticalGrid = gridGeometry ?? coordinateAdapter.getTopGrid(scene);
-  const zRange = definition.visibleAxes.includes("z") ? zBounds(tacticalStates) : ZERO_Z_RANGE;
+  const tacticalGrid = gridWithDimensions(
+    gridGeometry ?? coordinateAdapter.getTopGrid(scene),
+    gridDimensions
+  );
+  const zRange = definition.visibleAxes.includes("z")
+    ? zBounds(tacticalStates, tacticalGrid.depth)
+    : ZERO_Z_RANGE;
   const camera = definition.basis
     ? cameraForIsometric({
       definition,
@@ -558,9 +662,16 @@ function createOrthographicRenderModel({
     overlaps: withOverlapMetadata.stacks,
     movementPreview,
     selectedTokenId,
+    background: Object.freeze({
+      color: typeof background?.color === "string" ? background.color : DEFAULT_BACKGROUND,
+      image: typeof background?.image === "string" ? background.image : ""
+    }),
     axisLabels: projectionEngine.describe(view).labels,
     overlays: Object.freeze({
       grid: overlays.grid !== false,
+      gridOpacity: Number.isFinite(overlays.gridOpacity)
+        ? Math.min(1, Math.max(0, overlays.gridOpacity))
+        : 1,
       names: overlays.names !== false,
       elevation: overlays.elevation !== false,
       heading: overlays.heading !== false,
@@ -661,7 +772,7 @@ function drawArrowHead(context, point, vector) {
   context.lineTo(right.x, right.y);
 }
 
-function drawTacticalImage(context, image, point, markerRadius, rotation, mirrored) {
+function drawTacticalImage(context, image, point, width, height, rotation, mirrored) {
   if (typeof context.drawImage !== "function") return false;
   const canTransform = typeof context.save === "function"
     && typeof context.restore === "function"
@@ -672,10 +783,10 @@ function drawTacticalImage(context, image, point, markerRadius, rotation, mirror
     if (!canTransform) {
       context.drawImage(
         image,
-        point.x - markerRadius,
-        point.y - markerRadius,
-        markerRadius * 2,
-        markerRadius * 2
+        point.x - width / 2,
+        point.y - height / 2,
+        width,
+        height
       );
       return true;
     }
@@ -685,10 +796,10 @@ function drawTacticalImage(context, image, point, markerRadius, rotation, mirror
     if (mirrored) context.scale(-1, 1);
     context.drawImage(
       image,
-      -markerRadius,
-      -markerRadius,
-      markerRadius * 2,
-      markerRadius * 2
+      -width / 2,
+      -height / 2,
+      width,
+      height
     );
     context.restore();
     return true;
@@ -731,7 +842,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
   }
 
   invalidate(invalidation = {}) {
-    if (["resize", "scene-update", "view-change", "reconnect"].includes(invalidation?.type)) {
+    if (["resize", "scene-update", "view-change", "reconnect", "asset-loaded"].includes(invalidation?.type)) {
       this.clearStaticCache();
     }
     if (["scene-update", "reconnect"].includes(invalidation?.type)) this.gridGeometryCache.clear();
@@ -766,7 +877,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
   }
 
   getCachedGrid({ sceneId, view, camera, grid, width, height, dpr, gridOverlay,
-    projectionEngine, definition, zRange }) {
+    gridOpacity, background, projectionEngine, definition, zRange }) {
     const isZView = definition.visibleAxes.includes("z");
     const key = staticKeyFor({
       sceneId,
@@ -781,7 +892,9 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       width,
       height,
       dpr,
-      gridOverlay
+      gridOverlay,
+      gridOpacity,
+      background
     });
     const existing = this.staticGridCache.get(key);
     if (existing) {
@@ -806,12 +919,14 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       coordinateAdapter: this.coordinateAdapter,
       projectionEngine: this.projectionEngine,
       gridGeometry: this.getCachedGridGeometry(input.scene),
+      gridDimensions: input.gridDimensions,
       tacticalStates: input.visibleTacticalStates,
       viewport: input.viewport,
       zoom: panel.zoom,
       focus: panel.focus,
       pan: panel.pan,
       overlays: panel.overlays,
+      background: input.background ?? input.state?.background,
       selectedTokenId: input?.selectedTokenId ?? input?.state?.selectedTokenId,
       movementPreview: input?.state?.movementPreview
     };
@@ -828,6 +943,8 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
         height: dimensionsOf(viewport).height,
         dpr,
         gridOverlay: panel.overlays?.grid !== false,
+        gridOpacity: panel.overlays?.gridOpacity,
+        background: input.background ?? input.state?.background,
         projectionEngine,
         definition,
         zRange
@@ -845,10 +962,25 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       context.save?.();
       context.setTransform?.(dpr, 0, 0, dpr, 0, 0);
     }
-    context.fillStyle = this.colors.background ?? DEFAULT_BACKGROUND;
+    context.fillStyle = model.background?.color ?? this.colors.background ?? DEFAULT_BACKGROUND;
     context.fillRect?.(0, 0, width, height);
+    const backgroundImage = model.background?.image
+      ? this.assetManager?.peek?.(model.background.image)
+      : null;
+    if (backgroundImage && typeof context.drawImage === "function") {
+      try {
+        context.drawImage(backgroundImage, 0, 0, width, height);
+      } catch {
+        // The configured color remains the fallback when an image cannot draw.
+      }
+    }
     if (model.overlays.grid) {
+      const gridOpacity = Number.isFinite(model.overlays.gridOpacity)
+        ? Math.min(1, Math.max(0, model.overlays.gridOpacity))
+        : 1;
       context.lineWidth = 1;
+      const previousAlpha = context.globalAlpha;
+      context.globalAlpha = gridOpacity;
       const lines = model.grid.lines
         ?? [...model.grid.verticalLines, ...model.grid.horizontalLines];
       for (const line of lines) {
@@ -859,6 +991,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
         drawLine(context, line.start, line.end);
         context.stroke?.();
       }
+      context.globalAlpha = previousAlpha;
     }
     if (model.axisLabels) {
       context.fillStyle = this.colors.text ?? DEFAULT_TEXT;
@@ -902,10 +1035,13 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
   render(input = {}) {
     const context = input.context;
     if (!context) return false;
+    if (input.invalidation) this.invalidate(input.invalidation);
     const model = input.model ?? this.buildModel(input);
     const { width, height } = dimensionsOf(input.viewport);
     const dpr = positiveOr(input.devicePixelRatio,
       width > 0 ? (input.canvas?.width ?? width) / width : 1);
+
+    this.requestBackground(model.background, input);
 
     context.save?.();
     context.setTransform?.(dpr, 0, 0, dpr, 0, 0);
@@ -917,7 +1053,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     }
 
     for (const token of model.tokens) {
-      const { point, markerRadius, orientation } = token;
+      const { point, markerRadius, footprintWidth, footprintHeight, orientation } = token;
       const art = this.assetManager?.peekArt?.(token.art, model.view);
       const configuredForwardOffset = finiteOr(token.art?.forwardOffset, 0);
       const resolvedForwardOffset = finiteOr(art?.forwardOffset, configuredForwardOffset);
@@ -926,14 +1062,26 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
           context,
           art.image,
           point,
-          markerRadius,
+          footprintWidth ?? markerRadius * 2,
+          footprintHeight ?? markerRadius * 2,
           token.artRotation + (configuredForwardOffset - resolvedForwardOffset) * Math.PI / 180,
           art.mirrored === true
         )
         : false;
       if (!imageDrawn) {
         this.requestArt(token.art, model.view, input);
-        this.drawGeneratedMarker(context, point, markerRadius);
+        // A native Token texture is loading; leave the cell clear rather than
+        // flashing the old yellow placeholder over the tactical map.
+        if (!token.art?.icon) {
+          this.drawGeneratedMarker(
+            context,
+            point,
+            markerRadius,
+            footprintWidth,
+            footprintHeight,
+            token.multiCell
+          );
+        }
       }
 
       if (token.preview) {
@@ -1003,13 +1151,39 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     return true;
   }
 
-  drawGeneratedMarker(context, point, markerRadius) {
+  drawGeneratedMarker(context, point, markerRadius, footprintWidth, footprintHeight, multiCell = false) {
+    if (multiCell && typeof context.fillRect === "function"
+      && typeof context.strokeRect === "function") {
+      context.fillStyle = this.colors.token ?? DEFAULT_TOKEN;
+      context.fillRect(
+        point.x - footprintWidth / 2,
+        point.y - footprintHeight / 2,
+        footprintWidth,
+        footprintHeight
+      );
+      context.strokeStyle = this.colors.tokenStroke ?? DEFAULT_TOKEN_STROKE;
+      context.strokeRect(
+        point.x - footprintWidth / 2,
+        point.y - footprintHeight / 2,
+        footprintWidth,
+        footprintHeight
+      );
+      return;
+    }
     context.beginPath?.();
     context.fillStyle = this.colors.token ?? DEFAULT_TOKEN;
     context.arc?.(point.x, point.y, markerRadius, 0, Math.PI * 2);
     context.fill?.();
     context.strokeStyle = this.colors.tokenStroke ?? DEFAULT_TOKEN_STROKE;
     context.stroke?.();
+    if (multiCell && typeof context.strokeRect === "function") {
+      context.strokeRect(
+        point.x - footprintWidth / 2,
+        point.y - footprintHeight / 2,
+        footprintWidth,
+        footprintHeight
+      );
+    }
   }
 
   requestArt(art, view, input) {
@@ -1030,6 +1204,21 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     }, () => {
       this.pendingAssetInvalidations.delete(key);
     });
+  }
+
+  requestBackground(background, input) {
+    const source = typeof background?.image === "string" ? background.image.trim() : "";
+    if (!source || typeof this.assetManager?.load !== "function") return;
+    const key = `background|${source}`;
+    const before = this.assetManager.peek?.(source);
+    const promise = this.assetManager.load(source);
+    if (typeof input.invalidate !== "function" || this.pendingAssetInvalidations.has(key)) return;
+    this.pendingAssetInvalidations.add(key);
+    Promise.resolve(promise).then(() => {
+      this.pendingAssetInvalidations.delete(key);
+      const after = this.assetManager.peek?.(source);
+      if (!before && after) input.invalidate({ type: "asset-loaded", source });
+    }, () => this.pendingAssetInvalidations.delete(key));
   }
 
   /** Compatibility helper for callers that requested a generic preset directly. */

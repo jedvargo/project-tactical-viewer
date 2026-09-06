@@ -62,11 +62,13 @@ export class TacticalTokenState {
     const depth = positiveDimension(data.depth);
     const visibleToCurrentUser = this.visibilityService.isVisible(tokenDocument, options);
     const capabilities = this.permissionService.getCapabilities(tokenDocument);
+    const textureSource = data.texture?.src ?? data.img ?? "";
 
     return Object.freeze({
       tokenId: idOf(data) ?? idOf(tokenDocument),
       sceneId: idOf(scene),
       name: typeof data.name === "string" ? data.name : "",
+      textureSource: typeof textureSource === "string" ? textureSource : "",
       anchor: coordinates.anchor,
       anchorTactical: coordinates.anchorTactical,
       centerX: coordinates.centerX,

@@ -5,6 +5,10 @@
 }
 
 .tactical-viewer-shell {
+  --tactical-side-left: 0px;
+  --tactical-side-right: 0px;
+  --tactical-side-top: 0px;
+  --tactical-side-bottom: 0px;
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
@@ -23,6 +27,48 @@
   gap: 0.35rem;
   min-width: 0;
   padding: 0.25rem;
+}
+
+.tactical-viewer-shared-toolbar label,
+.tactical-viewer-overlay-options label,
+.tactical-viewer-shared-options label,
+.tactical-viewer-panel-toolbar label,
+.tactical-viewer-panel-name {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.tactical-viewer-shared-toolbar input[type="number"] {
+  max-width: 4.5rem;
+}
+
+.tactical-viewer-overlay-options input[type="range"] {
+  min-width: 5rem;
+}
+
+.tactical-viewer-overlay-options input[type="number"] {
+  max-width: 4.5rem;
+}
+
+.tactical-viewer-token-size-label {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.tactical-viewer-shell[data-display-mode="replace"] {
+  background: #111820;
+  inset: var(--tactical-side-top) var(--tactical-side-right)
+    var(--tactical-side-bottom) var(--tactical-side-left);
+  position: fixed;
+  z-index: 100;
+}
+
+.tactical-viewer-shell[data-maximized="true"]:not([data-display-mode="replace"]) {
+  margin-left: var(--tactical-side-left);
+  margin-right: var(--tactical-side-right);
 }
 
 .tactical-3d-viewer button:focus-visible,
@@ -59,6 +105,12 @@
   min-height: 2rem;
 }
 
+.tactical-viewer-panel-toolbar button,
+.tactical-viewer-shared-toolbar button,
+.tactical-viewer-direction-controls button {
+  white-space: nowrap;
+}
+
 .tactical-viewer-panel-toolbar select {
   flex: 1 1 7rem;
   min-width: min(7rem, 100%);
@@ -69,18 +121,30 @@
   text-align: center;
 }
 
-.tactical-viewer-panel-toolbar [data-role="interaction-status"] {
-  color: #b9c8d1;
-  font-size: 0.75rem;
-  margin-left: auto;
-}
-
 .tactical-viewer-overlay-options {
   background: #18232c;
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
   padding: 0.25rem;
+}
+
+.tactical-viewer-shared-options {
+  align-items: center;
+  background: #18232c;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.35rem;
+  width: 100%;
+}
+
+.tactical-viewer-shared-options[hidden] {
+  display: none;
+}
+
+.tactical-viewer-shared-options input[type="text"] {
+  min-width: 10rem;
 }
 
 .tactical-viewer-overlay-options[hidden] {
@@ -95,6 +159,44 @@
   min-width: 0;
   overflow: hidden;
 }
+
+.tactical-viewer-panel-surface {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.tactical-viewer-direction-controls {
+  background: rgba(24, 35, 44, 0.86);
+  border: 1px solid rgba(206, 229, 240, 0.35);
+  border-radius: 0.25rem;
+  display: grid;
+  gap: 0.15rem;
+  grid-template-columns: repeat(4, minmax(2rem, 2.4rem));
+  padding: 0.25rem;
+  position: absolute;
+  right: 0.5rem;
+  top: 0.5rem;
+  z-index: 3;
+}
+
+.tactical-viewer-direction-controls button {
+  min-height: 1.8rem;
+  min-width: 2rem;
+  padding: 0.15rem;
+}
+
+.tactical-viewer-direction-controls .direction-up { grid-column: 2; grid-row: 1; }
+.tactical-viewer-direction-controls .direction-left { grid-column: 1; grid-row: 2; }
+.tactical-viewer-direction-controls .direction-right { grid-column: 3; grid-row: 2; }
+.tactical-viewer-direction-controls .direction-down { grid-column: 2; grid-row: 3; }
+.tactical-viewer-direction-controls .direction-z-decrease { grid-column: 4; grid-row: 1; }
+.tactical-viewer-direction-controls .direction-z-increase { grid-column: 4; grid-row: 2; }
+.tactical-viewer-direction-controls .direction-pitch-decrease { grid-column: 1; grid-row: 4; }
+.tactical-viewer-direction-controls .direction-pitch-increase { grid-column: 2; grid-row: 4; }
+.tactical-viewer-direction-controls .direction-rotation-decrease { grid-column: 3; grid-row: 4; }
+.tactical-viewer-direction-controls .direction-rotation-increase { grid-column: 4; grid-row: 4; }
 
 .tactical-viewer-panel-grid [data-role="splitter-columns"],
 .tactical-viewer-panel-grid [data-role="splitter-rows"] {
@@ -156,10 +258,6 @@
     align-items: stretch;
   }
 
-  .tactical-viewer-panel-toolbar [data-role="interaction-status"] {
-    flex-basis: 100%;
-    margin-left: 0;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

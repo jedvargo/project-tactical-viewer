@@ -58,7 +58,7 @@ function formRoot(document) {
 }
 
 describe("configuration UI hook integration", () => {
-  it("adds Scene and Token controls through the ApplicationV2 render hook", () => {
+  it("adds only Scene controls through the ApplicationV2 render hook", () => {
     const hooks = createFakeFoundryHooks();
     const runtime = createRuntime({ hooks });
     runtime.initialize();
@@ -82,8 +82,8 @@ describe("configuration UI hook integration", () => {
       document: { documentName: "Token", flags: {} },
       isPrototype: false
     }, tokenElement, {}, {});
-    expect(tokenElement.querySelector('[data-role="tactical-token-config"]')).not.toBeNull();
-    expect(tokenElement.querySelector('[name="flags.tactical-3d-viewer.pitch"]')).not.toBeNull();
+    expect(tokenElement.querySelector('[data-role="tactical-token-config"]')).toBeNull();
+    expect(tokenElement.querySelector('[name="flags.tactical-3d-viewer.pitch"]')).toBeNull();
 
     const prototypeElement = formRoot(document);
     hooks.fire("renderApplicationV2", {
@@ -92,9 +92,7 @@ describe("configuration UI hook integration", () => {
       document: { documentName: "Actor" },
       token: { documentName: "PrototypeToken", flags: {} }
     }, prototypeElement, {}, {});
-    expect(prototypeElement.querySelector('[data-role="tactical-token-config"]')).not.toBeNull();
-    expect(prototypeElement.querySelector('[data-role="tactical-token-config"]').attributes.get("data-token-kind"))
-      .toBe("prototype");
+    expect(prototypeElement.querySelector('[data-role="tactical-token-config"]')).toBeNull();
   });
 
   it("disables Scene enablement and explains an unsupported grid", () => {
@@ -166,7 +164,7 @@ describe("configuration UI hook integration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders placed and prototype participation through Foundry's typed Boolean input helper", () => {
+  it("does not add token participation fields through Foundry's typed Boolean input helper", () => {
     const hooks = createFakeFoundryHooks();
     const document = documentFactory();
     const booleanInput = vi.fn(({ name, value }) => {
@@ -190,11 +188,8 @@ describe("configuration UI hook integration", () => {
     }, root, {}, {});
 
     const control = root.querySelector('[name="flags.tactical-3d-viewer.enabled"]');
-    expect(booleanInput).toHaveBeenCalledWith(expect.objectContaining({
-      name: "flags.tactical-3d-viewer.enabled",
-      value: true
-    }));
-    expect(control.checked).toBe(true);
+    expect(booleanInput).not.toHaveBeenCalled();
+    expect(control).toBeNull();
 
     const prototypeRoot = formRoot(document);
     hooks.fire("renderApplicationV2", {
@@ -206,12 +201,12 @@ describe("configuration UI hook integration", () => {
         flags: { "tactical-3d-viewer": { enabled: true } }
       }
     }, prototypeRoot, {}, {});
-    expect(booleanInput).toHaveBeenCalledTimes(2);
-    expect(prototypeRoot.querySelector('[name="flags.tactical-3d-viewer.enabled"]').checked).toBe(true);
+    expect(booleanInput).not.toHaveBeenCalled();
+    expect(prototypeRoot.querySelector('[name="flags.tactical-3d-viewer.enabled"]')).toBeNull();
     vi.unstubAllGlobals();
   });
 
-  it("marks the fallback token checkbox as a typed Boolean field", () => {
+  it("does not render a fallback token checkbox", () => {
     const hooks = createFakeFoundryHooks();
     const runtime = createRuntime({ hooks });
     runtime.initialize();
@@ -222,8 +217,7 @@ describe("configuration UI hook integration", () => {
       document: { documentName: "Token", flags: {} }
     }, root, {}, {});
 
-    expect(root.querySelector('[name="flags.tactical-3d-viewer.enabled"]')
-      .attributes.get("data-dtype")).toBe("Boolean");
+    expect(root.querySelector('[name="flags.tactical-3d-viewer.enabled"]')).toBeNull();
   });
 
   it("registers the configuration hook once and invalidates runtime state on flag updates", () => {

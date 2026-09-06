@@ -142,6 +142,29 @@ describe("TacticalUpdateService", () => {
     expect(token.update).toHaveBeenCalledTimes(1);
   });
 
+  it("updates a token footprint as one rectangular size edit", async () => {
+    const { service } = makeService();
+    const token = makeToken();
+    const snapshot = service.captureSizeSnapshot(token);
+
+    const result = await service.setSize(token, 2, 1, snapshot);
+
+    expect(result).toMatchObject({ status: "accepted", update: { width: 2, height: 1 } });
+    expect(token.update).toHaveBeenCalledWith({ width: 2, height: 1 });
+    expect(token.width).toBe(2);
+    expect(token.height).toBe(1);
+  });
+
+  it("rejects footprint sizes outside the supported range", async () => {
+    const { service } = makeService();
+    const token = makeToken();
+
+    const result = await service.setSize(token, 0, 1, service.captureSizeSnapshot(token));
+
+    expect(result).toMatchObject({ status: "rejected", reason: "invalid-size" });
+    expect(token.update).not.toHaveBeenCalled();
+  });
+
   it("does not update when permission is denied", async () => {
     const { scene, service } = makeService();
     const token = makeToken({ allowed: false });

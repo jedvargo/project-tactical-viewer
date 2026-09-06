@@ -126,6 +126,13 @@ export class TacticalUpdateService {
     return this.captureSnapshot(tokenOrPlaceable);
   }
 
+  captureSizeSnapshot(tokenOrPlaceable) {
+    return Object.freeze({
+      width: currentField(tokenOrPlaceable, "width"),
+      height: currentField(tokenOrPlaceable, "height")
+    });
+  }
+
   normalizeSnapshot(snapshot) {
     if (isRecord(snapshot?.snapshot)) return snapshot.snapshot;
     return snapshot;
@@ -313,6 +320,34 @@ export class TacticalUpdateService {
     } catch (error) {
       return rejected("invalid", { error });
     }
+  }
+
+  async setSize(tokenOrPlaceable, width, height, snapshot) {
+    const nextWidth = Number(width);
+    const nextHeight = Number(height);
+    if (!Number.isInteger(nextWidth) || nextWidth < 1 || nextWidth > 20
+      || !Number.isInteger(nextHeight) || nextHeight < 1 || nextHeight > 20) {
+      return rejected("invalid-size");
+    }
+    return await this.commit(tokenOrPlaceable, {
+      width: nextWidth,
+      height: nextHeight
+    }, {
+      snapshot,
+      fields: ["width", "height"],
+      action: UPDATE_ACTIONS.CONFIGURE
+    });
+  }
+
+  async setDimension(tokenOrPlaceable, dimension, value, snapshot) {
+    if (!["width", "height"].includes(dimension)) return rejected("invalid-size");
+    const next = Number(value);
+    if (!Number.isInteger(next) || next < 1 || next > 20) return rejected("invalid-size");
+    return await this.commit(tokenOrPlaceable, { [dimension]: next }, {
+      snapshot,
+      fields: [dimension],
+      action: UPDATE_ACTIONS.CONFIGURE
+    });
   }
 
   /** Persist placed-token or prototype-token tactical defaults as one partial update. */

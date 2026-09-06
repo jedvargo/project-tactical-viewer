@@ -2,7 +2,7 @@ import { ProjectionEngine } from "../projection/projection-engine.js";
 import { CoordinateAdapter } from "../model/coordinate-adapter.js";
 
 /** Logical zoom is deliberately independent of the canvas backing-store DPR. */
-export const MIN_LOGICAL_ZOOM = 16;
+export const MIN_LOGICAL_ZOOM = 8;
 export const MAX_LOGICAL_ZOOM = 512;
 export const DEFAULT_LOGICAL_ZOOM = 64;
 export const LOGICAL_ZOOM_STEP = 1.25;
@@ -629,6 +629,13 @@ export class PanelInputController {
       zoom: DEFAULT_LOGICAL_ZOOM,
       focus: null
     });
+    return this.panel;
+  }
+
+  centerView() {
+    this.panel.focus = null;
+    this.panel.pan = { x: 0, y: 0 };
+    this.notifyViewChanged({ type: "center-view", focus: null, pan: { x: 0, y: 0 } });
     return this.panel;
   }
 }

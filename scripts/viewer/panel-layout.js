@@ -1,4 +1,9 @@
-import { DEFAULT_OVERLAYS } from "../persistence/migrations.js";
+import {
+  normalizeGridDimensions,
+  normalizeBackground,
+  normalizeDisplayMode,
+  normalizedOverlays
+} from "../persistence/migrations.js";
 import { VIEW_DEFINITIONS } from "../constants.js";
 
 export const PANEL_COUNTS = Object.freeze([1, 2, 3, 4]);
@@ -60,10 +65,7 @@ function normalizedSplit(value) {
 }
 
 function panelOverlays(source) {
-  return {
-    ...DEFAULT_OVERLAYS,
-    ...(source && typeof source === "object" ? source : {})
-  };
+  return normalizedOverlays(source);
 }
 
 /** Normalize persisted layout state while retaining all four panel records. */
@@ -89,6 +91,9 @@ export function normalizePanelLayout(source = {}) {
       };
     }),
     splits: [normalizedSplit(splits[0]), normalizedSplit(splits[1])],
+    gridDimensions: normalizeGridDimensions(source?.gridDimensions),
+    background: normalizeBackground(source?.background),
+    displayMode: normalizeDisplayMode(source?.displayMode),
     links: {
       selection: links.selection !== false,
       center: links.center !== false,

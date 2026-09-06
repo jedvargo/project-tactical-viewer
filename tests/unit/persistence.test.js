@@ -208,6 +208,24 @@ describe("user-local persistence service", () => {
     expect(loaded.panels[0].overlays.names).toBe(false);
   });
 
+  it("normalizes grid opacity, dimensions, and display mode in a Scene layout", () => {
+    const layout = migrateUserLayout({
+      scenes: {
+        "scene-a": {
+          panels: [{ overlays: { gridOpacity: 0.35 } }],
+          gridDimensions: { columns: 12, rows: 8 },
+          displayMode: "replace"
+        }
+      }
+    });
+
+    expect(layout.scenes["scene-a"]).toMatchObject({
+      gridDimensions: { x: 12, y: 8, z: 10 },
+      displayMode: "replace"
+    });
+    expect(layout.scenes["scene-a"].panels[0].overlays.gridOpacity).toBe(0.35);
+  });
+
   it("keeps two users' fake settings independent", async () => {
     const userASettings = makeSettings(undefined);
     const userBSettings = makeSettings(undefined);

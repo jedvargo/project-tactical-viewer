@@ -9,6 +9,9 @@ export const CURRENT_LAYOUT_SCHEMA_VERSION = CURRENT_SCHEMA_VERSION;
 // explicit so storage cannot grow with the number of Scenes ever visited.
 export const MAX_SCENE_LAYOUTS = 32;
 
+export const DEFAULT_GRID_OPACITY = 1;
+export const DEFAULT_BACKGROUND = Object.freeze({ color: "#111820", image: "" });
+
 export const DEFAULT_OVERLAYS = Object.freeze({
   grid: true,
   names: true,
@@ -16,8 +19,12 @@ export const DEFAULT_OVERLAYS = Object.freeze({
   heading: true,
   pitch: true,
   coordinates: true,
-  debugAxes: false
+  debugAxes: false,
+  gridOpacity: DEFAULT_GRID_OPACITY
 });
+
+export const DEFAULT_DISPLAY_MODE = "window";
+export const DISPLAY_MODES = Object.freeze(["window", "scene", "replace"]);
 
 const DEFAULT_PANEL_VIEWS = Object.freeze(["top", "north", "iso-ne", "west"]);
 const VIEW_IDS = new Set(VIEW_DEFINITIONS.map(({ id }) => id));
@@ -84,6 +91,40 @@ function normalizedBoolean(value, fallback) {
   return typeof value === "boolean" ? value : fallback;
 }
 
+export function normalizeGridOpacity(value, fallback = DEFAULT_GRID_OPACITY) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(1, Math.max(0, number)) : fallback;
+}
+
+export function normalizeGridDimensions(value) {
+  if (!isRecord(value)) return null;
+  const columns = Number(value.x ?? value.columns);
+  const rows = Number(value.y ?? value.rows);
+  const depth = Number(value.z ?? value.depth ?? 10);
+  if (!Number.isInteger(columns) || columns < 1 || columns > 200
+    || !Number.isInteger(rows) || rows < 1 || rows > 200
+    || !Number.isInteger(depth) || depth < 1 || depth > 200) return null;
+  const normalized = { x: columns, y: rows, z: depth };
+  Object.defineProperties(normalized, {
+    columns: { value: columns, enumerable: false },
+    rows: { value: rows, enumerable: false }
+  });
+  return normalized;
+}
+
+export function normalizeBackground(value) {
+  const source = isRecord(value) ? value : {};
+  const color = typeof source.color === "string" && /^#[0-9a-f]{6}$/i.test(source.color)
+    ? source.color
+    : DEFAULT_BACKGROUND.color;
+  const image = typeof source.image === "string" ? source.image.trim() : "";
+  return { color, image };
+}
+
+export function normalizeDisplayMode(value, fallback = DEFAULT_DISPLAY_MODE) {
+  return DISPLAY_MODES.includes(value) ? value : fallback;
+}
+
 function normalizedView(value, fallback) {
   return typeof value === "string" && VIEW_IDS.has(value) ? value : fallback;
 }
@@ -106,9 +147,12 @@ function normalizedOverlays(value) {
     ...DEFAULT_OVERLAYS,
     ...Object.fromEntries(Object.entries(DEFAULT_OVERLAYS)
       .filter(([key]) => typeof source[key] === "boolean")
-      .map(([key]) => [key, source[key]]))
+      .map(([key]) => [key, source[key]])),
+    gridOpacity: normalizeGridOpacity(source.gridOpacity)
   };
 }
+
+export { normalizedOverlays };
 
 function normalizedDefaults(source) {
   const defaults = isRecord(source?.defaults) ? source.defaults : {};
@@ -195,7 +239,10 @@ function normalizeSceneLayout(source, defaults) {
     links: normalizedLinks(source, defaults),
     panels,
     splits,
-    overlays: normalizedOverlays(source.overlays)
+    overlays: normalizedOverlays(source.overlays),
+    gridDimensions: normalizeGridDimensions(source.gridDimensions),
+    background: normalizeBackground(source.background),
+    displayMode: normalizeDisplayMode(source.displayMode)
   };
 }
 
@@ -248,7 +295,8 @@ export function defaultSceneLayout(defaults = DEFAULT_USER_LAYOUT.defaults) {
       selection: normalized.linkSelection,
       center: normalized.linkCenter,
       zoom: normalized.linkZoom
-    }
+    },
+    displayMode: DEFAULT_DISPLAY_MODE
   }, normalized);
 }
 
