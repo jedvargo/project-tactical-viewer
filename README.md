@@ -48,9 +48,11 @@ orthographic panel. The drop is snapped to the tactical grid and creates a
 real TokenDocument in the active Scene. Isometric panels are read-only drop
 surfaces because a 2D drop cannot uniquely determine all three coordinates.
 Actor drops preserve the Actor's token prototype footprint. Panel Options also
-provide selected-token width and height controls from 1 to 20 squares, so a
-ship can occupy a rectangular footprint such as 2x1. The footprint is used by
-all projections and image drops default to 1x1 unless dimensions are supplied.
+provide independent selected-token length, width, and height controls from 1
+to 20 squares. Length maps to tactical X, width to tactical Y, and height to
+tactical Z; changing one does not resize the others. Actor-backed size changes
+apply to matching placed tokens in all loaded Scenes. The footprint is used by
+all projections and image drops default to 1x1x1 unless dimensions are supplied.
 
 The three user-local links are **Link Selection**, **Link Center**, and
 **Link Zoom**. Turn any link off to navigate that panel independently.
@@ -69,9 +71,29 @@ state.
 
 ## Token art
 
-Native Token textures are loaded lazily. A broken or missing image never
-removes a token from the viewer; the footprint remains represented until the
-texture is available.
+Artwork for the active panel views is resolved during initialization and cached
+thereafter. Explicit per-view art paths take priority. Ship
+tokens use Foundry's Data-root `assets/ships/` directory for actor-name views using
+this convention:
+
+```text
+the-spelljammer-top.webp
+the-spelljammer-bottom.webp
+the-spelljammer-front.webp
+the-spelljammer-back.webp
+the-spelljammer-left.webp
+the-spelljammer-right.webp
+the-spelljammer-isometric.webp
+```
+
+The name comes from the Actor/vehicle name, converted to lowercase kebab-case;
+the token image filename is not used. Supported extensions are `webp`, `png`,
+`svg`, and `gif`.
+
+Each view is tried as `.webp`, `.png`, `.svg`, then `.gif`. The native Token
+texture remains the fallback before the selected generic preset. A broken or
+missing image never removes a token from the viewer; the footprint remains
+represented until another fallback is available.
 
 ## Limitations
 
@@ -98,6 +120,12 @@ texture is available.
 - Check the browser console for the first error after reloading, then run the
   automated checks below. Include Foundry version, Scene grid type, and module
   version when reporting a reproducible issue.
+- To trace token filtering and artwork selection, enable the diagnostic switch
+  below before opening the viewer. The browser console will show
+  whether each token was skipped, accepted, culled, or rendered with a native,
+  automatic, custom, or generic asset. For an immediate one-session switch,
+  run `globalThis.__TACTICAL_3D_VIEWER_DEBUG__ = true` in the console before
+  opening the viewer.
 
 ## Privacy and security
 

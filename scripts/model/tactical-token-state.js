@@ -2,6 +2,7 @@ import { CoordinateAdapter } from "./coordinate-adapter.js";
 import { OrientationAdapter } from "./orientation-adapter.js";
 import {
   getTacticalTokenFlags,
+  getTokenDepth,
   getTokenPitch
 } from "./token-flags.js";
 import { PermissionService } from "../permission-service.js";
@@ -17,6 +18,29 @@ function documentData(tokenDocument) {
 
 function idOf(value) {
   return value?.id;
+}
+
+function actorOf(tokenDocument, data) {
+  const actorId = tokenDocument?.actorId ?? data?.actorId;
+  return tokenDocument?.actor
+    ?? data?.actor
+    ?? globalThis?.game?.actors?.get?.(actorId)
+    ?? null;
+}
+
+function actorNameOf(tokenDocument, data) {
+  const actor = actorOf(tokenDocument, data);
+  const name = actor?.name ?? actor?.document?.name ?? data?.actorName ?? data?.name;
+  return typeof name === "string" ? name : "";
+}
+
+function actorTextureOf(tokenDocument, data) {
+  const actor = actorOf(tokenDocument, data);
+  const source = actor?.texture?.src
+    ?? actor?.img
+    ?? actor?.prototypeToken?.texture?.src
+    ?? actor?.prototypeToken?.img;
+  return typeof source === "string" ? source : "";
 }
 
 function positiveDimension(value, fallback = 1) {
@@ -59,7 +83,7 @@ export class TacticalTokenState {
     const rotation = typeof data.rotation === "number" && Number.isFinite(data.rotation)
       ? data.rotation
       : 0;
-    const depth = positiveDimension(data.depth);
+    const depth = getTokenDepth(tokenDocument);
     const visibleToCurrentUser = this.visibilityService.isVisible(tokenDocument, options);
     const capabilities = this.permissionService.getCapabilities(tokenDocument);
     const textureSource = data.texture?.src ?? data.img ?? "";
@@ -68,6 +92,8 @@ export class TacticalTokenState {
       tokenId: idOf(data) ?? idOf(tokenDocument),
       sceneId: idOf(scene),
       name: typeof data.name === "string" ? data.name : "",
+      actorName: actorNameOf(tokenDocument, data),
+      actorTextureSource: actorTextureOf(tokenDocument, data),
       textureSource: typeof textureSource === "string" ? textureSource : "",
       anchor: coordinates.anchor,
       anchorTactical: coordinates.anchorTactical,

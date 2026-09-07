@@ -4,6 +4,8 @@ import {
   Canvas2DRendererV1,
   DEFAULT_GRID_MARGIN,
   createBottomRenderModel,
+  createLeftRenderModel,
+  createRightRenderModel,
   createIsometricRenderModel,
   createNorthRenderModel,
   createSouthRenderModel,
@@ -92,6 +94,40 @@ function renderInput(states, overrides = {}) {
 }
 
 describe("Canvas2DRendererV1", () => {
+  it("preloads visible token artwork for every requested view", () => {
+    const assetManager = {
+      peekArt: vi.fn(() => null),
+      loadArt: vi.fn(async () => ({ image: {} }))
+    };
+    const renderer = new Canvas2DRendererV1({ assetManager });
+
+    expect(renderer.preloadArt(
+      [state({ actorName: "Aurora", textureSource: "aurora.webp" })],
+      ["left", "right", "front"]
+    )).toBe(true);
+    expect(assetManager.loadArt).toHaveBeenCalledTimes(3);
+    expect(assetManager.loadArt).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ actorName: "Aurora", textureSource: "aurora.webp" }),
+      "left"
+    );
+  });
+
+  it("keeps left/right identity artwork upright at H0/P0", () => {
+    for (const [view, createModel] of [["left", createLeftRenderModel], ["right", createRightRenderModel]]) {
+      const model = createModel({
+        scene: scene(),
+        coordinateAdapter: new CoordinateAdapter(),
+        projectionEngine: new ProjectionEngine(),
+        tacticalStates: [state({ heading: 0, pitch: 0 })],
+        viewport: { width: 600, height: 400 },
+        zoom: 50
+      });
+      const token = model.tokens[0];
+      expect(token.artRotation).toBe(0);
+    }
+  });
+
   it("fits an initial grid inside the viewport with the default outer margin", () => {
     const model = createTopRenderModel({
       scene: scene(),
@@ -122,6 +158,43 @@ describe("Canvas2DRendererV1", () => {
     expect(model.grid.rows).toBe(2);
     expect(model.overlays.gridOpacity).toBe(0.25);
     expect(model.grid.lines.length).toBeGreaterThan(0);
+  });
+
+  it("applies isometric opacity to face grids but keeps volume outlines solid", () => {
+    const model = createIsometricRenderModel({
+      view: "iso-ne",
+      scene: scene(),
+      viewport: { width: 600, height: 400 },
+      zoom: 20,
+      focus: { x: 1, y: 1, z: 1 },
+      gridDimensions: { x: 2, y: 2, z: 2 },
+      overlays: { gridOpacity: 0.25 }
+    });
+    const context = fakeContext();
+    const alphaValues = [];
+    let currentAlpha = 1;
+    Object.defineProperty(context, "globalAlpha", {
+      configurable: true,
+      get: () => currentAlpha,
+      set: (value) => {
+        alphaValues.push(value);
+        currentAlpha = value;
+      }
+    });
+
+    new Canvas2DRendererV1().render({
+      canvas: { width: 600, height: 400 },
+      context,
+      viewport: { width: 600, height: 400 },
+      model
+    });
+
+    const lineAlphaValues = alphaValues.slice(0, model.grid.lines.length);
+    expect(model.grid.lines.filter(({ outline }) => outline)).toHaveLength(12);
+    expect(lineAlphaValues.filter((value) => value === 1)).toHaveLength(12);
+    expect(lineAlphaValues.filter((value) => value === 0.25)).toHaveLength(
+      model.grid.lines.length - 12
+    );
   });
 
   it("keeps the configured Z grid size when a token is above its bounds", () => {
@@ -509,6 +582,13 @@ describe("Canvas2DRendererV1", () => {
     });
 
     expect(context.calls).toContainEqual(["fillText", "OFF GRID", 350, 156]);
+  });
+
+  it("renders tactical Z as an integer", () => {
+    const { context } = renderInput([state({ tacticalZ: 1.1002000000000698 })]);
+
+    expect(context.calls.some(([name, value]) => name === "fillText" && value === "Z +1")).toBe(true);
+    expect(context.calls.some(([name, value]) => name === "fillText" && String(value).includes("1.1002"))).toBe(false);
   });
 
   it("draws the projected Top grid, token center, orientation vector, and labels", () => {

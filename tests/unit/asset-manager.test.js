@@ -13,6 +13,28 @@ function image(source) {
 }
 
 describe("AssetManager", () => {
+  it("resolves Data-root ship art separately from module-owned generic art", async () => {
+    vi.stubGlobal("location", { href: "http://localhost:30000/game" });
+    vi.stubGlobal("game", {
+      modules: { get: () => ({ url: "http://localhost:30000/modules/tactical-3d-viewer" }) }
+    });
+    const imageFactory = vi.fn(async (source) => image(source));
+    const manager = new AssetManager({ imageFactory });
+
+    await manager.load("assets/ships/four-fingered-queen-top.webp");
+    await manager.load(GENERIC_ASSET_PATHS.ship);
+
+    expect(imageFactory).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:30000/assets/ships/four-fingered-queen-top.webp"
+    );
+    expect(imageFactory).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:30000/modules/tactical-3d-viewer/assets/generic/ship.svg"
+    );
+    vi.unstubAllGlobals();
+  });
+
   it("loads and caches a decoded built-in preset", async () => {
     const decoded = image("ship");
     const imageFactory = vi.fn(async (source) => {

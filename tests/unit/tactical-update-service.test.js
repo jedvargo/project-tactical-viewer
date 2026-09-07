@@ -33,6 +33,7 @@ function makeToken({
     update: vi.fn(async (update) => {
       for (const [key, value] of Object.entries(update)) {
         if (key === `flags.${MODULE_ID}.pitch`) document.flags[MODULE_ID].pitch = value;
+        else if (key === `flags.${MODULE_ID}.depth`) document.flags[MODULE_ID].depth = value;
         else document[key] = value;
       }
       return document;
@@ -170,6 +171,26 @@ describe("TacticalUpdateService", () => {
     expect(token.height).toBe(1);
   });
 
+  it("updates length, width, and height independently without ratio coupling", async () => {
+    const { service } = makeService();
+    const token = makeToken();
+    token.depth = 1;
+    const snapshot = service.captureSizeSnapshot(token);
+
+    const result = await service.setDimensions(token, {
+      width: 4,
+      height: 2,
+      depth: 7
+    }, snapshot);
+
+    expect(result).toMatchObject({
+      status: "accepted",
+      update: { width: 4, height: 2, [`flags.${MODULE_ID}.depth`]: 7 }
+    });
+    expect(token).toMatchObject({ width: 4, height: 2 });
+    expect(token.flags[MODULE_ID].depth).toBe(7);
+  });
+
   it("rejects footprint sizes outside the supported range", async () => {
     const { service } = makeService();
     const token = makeToken();
@@ -178,6 +199,28 @@ describe("TacticalUpdateService", () => {
 
     expect(result).toMatchObject({ status: "rejected", reason: "invalid-size" });
     expect(token.update).not.toHaveBeenCalled();
+  });
+
+  it("reads canonical fields from the returned TokenDocument when update returns a placeable wrapper", async () => {
+    const { service } = makeService();
+    const token = makeToken();
+    token.update = vi.fn(async (update) => {
+      token.width = update.width;
+      return {
+        document: token,
+        // A placeable can expose a derived/render width instead of the
+        // persisted TokenDocument width.
+        width: 1.1002000000000698
+      };
+    });
+
+    const result = await service.setDimensions(token, { width: 2 }, service.captureSizeSnapshot(token));
+
+    expect(result).toMatchObject({
+      status: "accepted",
+      canonical: { width: 2 },
+      adjusted: false
+    });
   });
 
   it("does not update when permission is denied", async () => {

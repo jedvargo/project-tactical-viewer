@@ -5,6 +5,7 @@ import {
   AssetManager,
   getTacticalArtCandidates
 } from "./asset-manager.js";
+import { debugTokenUsage } from "../debug.js";
 import { localize, localizeFormat } from "../i18n.js";
 
 const DEFAULT_BACKGROUND = "#111820";
@@ -285,7 +286,9 @@ function gridWithDimensions(grid, dimensions) {
 }
 
 function formatSigned(value) {
-  return value > 0 ? `+${value}` : String(value);
+  const numeric = Number(value);
+  const normalized = Number.isFinite(numeric) ? Math.round(numeric) : value;
+  return normalized > 0 ? `+${normalized}` : String(normalized);
 }
 
 function formatHeading(value) {
@@ -496,27 +499,51 @@ function projectedVerticalGrid({ grid, camera, projectionEngine, zRange, definit
 
 function projectedIsometricGrid({ grid, camera, projectionEngine, zRange }) {
   const lines = [];
-  const addLine = (axis, start, end, major = false) => {
+  const addLine = (axis, start, end, major = false, outline = false) => {
     lines.push({
       axis,
       start: projectionEngine.projectPoint(start, camera),
       end: projectionEngine.projectPoint(end, camera),
-      major
+      major,
+      // `major` identifies the boundary of a face for color/weight. The
+      // opacity slider should still affect face-boundary grid lines; only
+      // the actual twelve edges of the volume remain fully solid.
+      outline
     });
   };
 
   for (let z = zRange.min; z <= zRange.max; z += 1) {
     for (let y = 0; y <= grid.rows; y += 1) {
-      addLine("x", { x: 0, y, z }, { x: grid.columns, y, z }, y === 0 || y === grid.rows);
+      const major = y === 0 || y === grid.rows;
+      addLine(
+        "x",
+        { x: 0, y, z },
+        { x: grid.columns, y, z },
+        major,
+        major && (z === zRange.min || z === zRange.max)
+      );
     }
     for (let x = 0; x <= grid.columns; x += 1) {
-      addLine("y", { x, y: 0, z }, { x, y: grid.rows, z }, x === 0 || x === grid.columns);
+      const major = x === 0 || x === grid.columns;
+      addLine(
+        "y",
+        { x, y: 0, z },
+        { x, y: grid.rows, z },
+        major,
+        major && (z === zRange.min || z === zRange.max)
+      );
     }
   }
   for (let x = 0; x <= grid.columns; x += 1) {
     for (let y = 0; y <= grid.rows; y += 1) {
-      addLine("z", { x, y, z: zRange.min }, { x, y, z: zRange.max },
-        x === 0 || x === grid.columns || y === 0 || y === grid.rows);
+      const major = x === 0 || x === grid.columns || y === 0 || y === grid.rows;
+      addLine(
+        "z",
+        { x, y, z: zRange.min },
+        { x, y, z: zRange.max },
+        major,
+        (x === 0 || x === grid.columns) && (y === 0 || y === grid.rows)
+      );
     }
   }
 
@@ -617,11 +644,14 @@ function visibleToken(state, projectionEngine, camera, viewport, definition, sel
     orientationVector(state.heading, state.pitch),
     { ...camera, scale: camera.scale * 0.5 }
   );
-  const forwardOffset = state.textureSource
-    ? 0
-    : finiteOr(state.art?.forwardOffset, 0) * Math.PI / 180;
+  const forwardOffset = finiteOr(state.art?.forwardOffset, 0) * Math.PI / 180;
   const artRotation = definition.basis
     ? isometricImageRotation(state.heading, state.pitch, finiteOr(state.art?.forwardOffset, 0))
+    // Left and Right are elevation views. Keep the identity sprite upright
+    // there; the projected orientation vector below remains the authoritative
+    // indicator of heading and pitch.
+    : ["left", "right"].includes(definition.id)
+      ? (forwardOffset === 0 ? 0 : -forwardOffset)
     : (() => {
       const artDirection = projectionEngine.projectOrientationVector(
         orientationVector(state.heading, 0),
@@ -653,9 +683,17 @@ function visibleToken(state, projectionEngine, camera, viewport, definition, sel
     depth,
     // Native Token texture is authoritative. Legacy Tactical Viewer art flags
     // are deliberately not allowed to replace the document's real token.
-    art: state.textureSource
-      ? { icon: state.textureSource, preset: "generic-marker", forwardOffset: 0 }
-      : state.art,
+    // Keep actor identity and the native texture available to the artwork
+    // resolver. Automatic actor-name views are checked before this texture;
+    // the texture remains the final token-specific fallback before presets.
+    art: {
+      ...state.art,
+      actorName: typeof state.actorName === "string" ? state.actorName : "",
+      actorTextureSource: typeof state.actorTextureSource === "string"
+        ? state.actorTextureSource
+        : "",
+      textureSource: typeof state.textureSource === "string" ? state.textureSource : ""
+    },
     artRotation,
     worldPoint: Object.freeze(worldPoint),
     depthKey: definition.basis ? projectionEngine.depthKey(worldPoint, camera) : null,
@@ -859,11 +897,22 @@ function createOrthographicRenderModel({
     })
     : projectedGrid({ grid: tacticalGrid, camera, projectionEngine }));
   const projectedTokens = [];
+  debugTokenUsage("render-model-start", {
+    sceneId: scene?.id ?? null,
+    view,
+    stateCount: Array.isArray(tacticalStates) ? tacticalStates.length : 0
+  });
   for (const state of (Array.isArray(tacticalStates) ? tacticalStates : [])) {
     const effectiveState = movementPreview?.tokenId === state?.tokenId
       ? { ...state, ...movementPreview, preview: true }
       : state;
     if (effectiveState?.visibleToCurrentUser !== true || effectiveState?.participating !== true) {
+      debugTokenUsage("render-model-skip", {
+        tokenId: effectiveState?.tokenId ?? null,
+        reason: effectiveState?.visibleToCurrentUser !== true ? "not-visible" : "not-participating",
+        visibleToCurrentUser: effectiveState?.visibleToCurrentUser,
+        participating: effectiveState?.participating
+      });
       continue;
     }
     const projected = visibleToken(
@@ -875,8 +924,19 @@ function createOrthographicRenderModel({
       selectedTokenId
     );
     if (!projected) {
+      debugTokenUsage("render-model-cull", {
+        tokenId: effectiveState?.tokenId ?? null,
+        reason: "outside-viewport"
+      });
       continue;
     }
+    debugTokenUsage("render-model-accepted", {
+      tokenId: projected.tokenId,
+      view,
+      point: projected.point,
+      sourceTexture: projected.art?.textureSource ?? "",
+      actorName: projected.art?.actorName ?? ""
+    });
     projectedTokens.push(projected);
   }
   const withOverlapMetadata = addOverlapMetadata(projectedTokens, definition);
@@ -1230,6 +1290,33 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     });
   }
 
+  /**
+   * Start artwork resolution independently of panel culling. A panel can be
+   * hidden or have a zero-sized first layout, in which case its token models
+   * never reach render() and lazy loading would never begin.
+   */
+  preloadArt(tacticalStates = [], views = this.projectionEngine.listViews?.(), input = {}) {
+    if (typeof this.assetManager?.loadArt !== "function") return false;
+    const requestedViews = Array.isArray(views) && views.length > 0
+      ? views
+      : ["top", "bottom", "left", "right", "front", "back", "isometric"];
+    for (const state of tacticalStates) {
+      if (state?.visibleToCurrentUser !== true || state?.participating !== true) continue;
+      const art = {
+        ...(state.art ?? {}),
+        actorName: state.actorName ?? state.art?.actorName ?? "",
+        actorTextureSource: state.actorTextureSource ?? state.art?.actorTextureSource ?? "",
+        textureSource: state.textureSource ?? state.art?.textureSource ?? ""
+      };
+      for (const view of requestedViews) {
+        if (!this.assetManager.peekArt?.(art, view)) {
+          this.requestArt(art, view, input, state.tokenId);
+        }
+      }
+    }
+    return true;
+  }
+
   drawStatic(context, model, width, height, dpr = 1, transform = true) {
     if (transform) {
       context.save?.();
@@ -1264,10 +1351,14 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
         ?? [...model.grid.verticalLines, ...model.grid.horizontalLines];
       for (const line of lines) {
         context.beginPath?.();
-        context.globalAlpha = line.major ? 1 : gridOpacity;
-        // Major lines retain their stronger color/opacity, but they obey the
-        // selected line pattern too. This is especially important in the
-        // isometric volume, where every outer edge is marked major.
+        // Isometric face boundaries remain visually strong through their
+        // major color, but obey the opacity slider. `outline` is explicit for
+        // isometric lines so the twelve volume edges can stay fully solid.
+        const solidLine = line.outline === undefined ? line.major : line.outline;
+        context.globalAlpha = solidLine ? 1 : gridOpacity;
+        // Major lines retain their stronger color, and all lines obey the
+        // selected line pattern. This keeps isometric face boundaries visible
+        // without making them immune to the opacity control.
         context.setLineDash?.(lineDash);
         context.lineCap = gridStyle === "dots" ? "round" : "butt";
         context.strokeStyle = line.major
@@ -1328,6 +1419,17 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     const dpr = positiveOr(input.devicePixelRatio,
       width > 0 ? (input.canvas?.width ?? width) / width : 1);
 
+    debugTokenUsage("canvas-render-start", {
+      view: model.view,
+      tokenCount: model.tokens.length,
+      viewport: { width, height },
+      devicePixelRatio: dpr,
+      canvas: {
+        width: input.canvas?.width ?? context.canvas?.width ?? null,
+        height: input.canvas?.height ?? context.canvas?.height ?? null
+      }
+    });
+
     this.requestBackground(model.background, input);
 
     context.save?.();
@@ -1343,16 +1445,35 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       const { point, markerRadius, footprintWidth, footprintHeight, orientation } = token;
       const tokenIsometric = token.isometric === true || isometricView(model.view);
       const art = this.assetManager?.peekArt?.(token.art, model.view);
+      debugTokenUsage("render-token", {
+        tokenId: token.tokenId,
+        view: model.view,
+        artSource: art?.source ?? null,
+        artLevel: art?.level ?? null,
+        artStatus: art ? "ready" : "pending-or-missing",
+        textureSource: token.art?.textureSource ?? "",
+        actorName: token.art?.actorName ?? ""
+      });
       if (tokenIsometric) {
-        if (!art?.image) this.requestArt(token.art, model.view, input);
+        if (!art?.image) this.requestArt(token.art, model.view, input, token.tokenId);
+        const imageDrawn = Boolean(art?.image);
         this.drawIsometricToken(
           context,
           token,
           model.camera,
           art?.image,
           art?.mirrored === true,
-          art?.forwardOffset
+          art?.forwardOffset,
+          token.tokenId
         );
+        debugTokenUsage("canvas-image-draw", {
+          tokenId: token.tokenId,
+          view: model.view,
+          mode: "isometric",
+          attempted: imageDrawn,
+          source: art?.source ?? null,
+          point: token.point
+        });
       } else {
         const configuredForwardOffset = finiteOr(token.art?.forwardOffset, 0);
         const resolvedForwardOffset = finiteOr(art?.forwardOffset, configuredForwardOffset);
@@ -1367,8 +1488,19 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
             art.mirrored === true
           )
           : false;
+        debugTokenUsage("canvas-image-draw", {
+          tokenId: token.tokenId,
+          view: model.view,
+          mode: "orthographic",
+          attempted: Boolean(art?.image),
+          drawn: imageDrawn,
+          source: art?.source ?? null,
+          point,
+          width: footprintWidth ?? markerRadius * 2,
+          height: footprintHeight ?? markerRadius * 2
+        });
         if (!imageDrawn) {
-          this.requestArt(token.art, model.view, input);
+          this.requestArt(token.art, model.view, input, token.tokenId);
           // Keep the token visible while native/custom artwork loads or if it
           // fails. The generated marker is the stable, projection-independent
           // fallback and preserves the token footprint.
@@ -1482,7 +1614,8 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     camera,
     image = null,
     mirrored = false,
-    resolvedForwardOffset = undefined
+    resolvedForwardOffset = undefined,
+    tokenId = null
   ) {
     const geometry = isometricTokenGeometry(token, this.projectionEngine, camera);
     const faceColors = [
@@ -1497,13 +1630,21 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     }
     const configuredForwardOffset = finiteOr(token.art?.forwardOffset, 0);
     const actualForwardOffset = finiteOr(resolvedForwardOffset, configuredForwardOffset);
-    if (image) drawImageOnIsometricFace(
-      context,
-      image,
-      geometry.imageFace,
-      mirrored,
-      token.artRotation + (configuredForwardOffset - actualForwardOffset) * Math.PI / 180
-    );
+    if (image) {
+      const imageDrawn = drawImageOnIsometricFace(
+        context,
+        image,
+        geometry.imageFace,
+        mirrored,
+        token.artRotation + (configuredForwardOffset - actualForwardOffset) * Math.PI / 180
+      );
+      debugTokenUsage("canvas-image-draw-result", {
+        tokenId,
+        mode: "isometric-face",
+        drawn: imageDrawn,
+        source: image?.src ?? image?.source ?? null
+      });
+    }
 
     context.strokeStyle = this.colors.isometricEdge ?? DEFAULT_ISOMETRIC_EDGE;
     context.lineWidth = 1;
@@ -1560,9 +1701,16 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     }
   }
 
-  requestArt(art, view, input) {
+  requestArt(art, view, input, tokenId = null) {
     if (typeof this.assetManager?.loadArt !== "function") return;
     const candidates = getTacticalArtCandidates(art, view);
+    debugTokenUsage("art-request", {
+      tokenId,
+      view,
+      actorName: art?.actorName ?? "",
+      textureSource: art?.textureSource ?? "",
+      candidates: candidates.map(({ source, level }) => ({ source, level }))
+    });
     const key = `${view}|${candidates.map(({ source, mirrored }) =>
       `${mirrored ? "m" : "n"}:${source}`).join("|")}`;
     const before = this.assetManager.peekArt?.(art, view) ?? null;
@@ -1572,10 +1720,22 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
     Promise.resolve(promise).then(() => {
       this.pendingAssetInvalidations.delete(key);
       const after = this.assetManager.peekArt?.(art, view) ?? null;
+      debugTokenUsage("art-request-complete", {
+        tokenId,
+        view,
+        source: after?.source ?? null,
+        level: after?.level ?? null,
+        loaded: Boolean(after?.image)
+      });
       if (!before?.image && after?.image) {
         input.invalidate({ type: "asset-loaded", view, source: after.source });
       }
-    }, () => {
+    }, (error) => {
+      debugTokenUsage("art-request-rejected", {
+        tokenId,
+        view,
+        error: error?.message ?? String(error)
+      });
       this.pendingAssetInvalidations.delete(key);
     });
   }

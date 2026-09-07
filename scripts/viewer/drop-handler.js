@@ -12,10 +12,32 @@ function parseJson(value) {
   }
 }
 
+function textEditorImplementation() {
+  // Foundry v14 moved TextEditor behind the applications namespace. Keep the
+  // legacy global as the final fallback for older supported installations;
+  // reading it only after the v14 path avoids Foundry's compatibility warning.
+  return globalThis?.foundry?.applications?.ux?.TextEditor?.implementation
+    ?? globalThis?.foundry?.applications?.ux?.TextEditor
+    ?? globalThis?.CONFIG?.ux?.TextEditor
+    ?? globalThis?.TextEditor;
+}
+
+function fromUuidImplementation() {
+  return globalThis?.foundry?.utils?.fromUuid
+    ?? globalThis?.fromUuid;
+}
+
+function uuidPart(uuid, documentName) {
+  if (typeof uuid !== "string" || !uuid) return null;
+  const parts = uuid.split(".");
+  const index = parts.indexOf(documentName);
+  return index >= 0 ? parts[index + 1] ?? null : null;
+}
+
 /** Read the same serialized payload used by Foundry sidebar drag sources. */
 export function getViewerDropData(event) {
   try {
-    const parsed = globalThis?.TextEditor?.getDragEventData?.(event);
+    const parsed = textEditorImplementation()?.getDragEventData?.(event);
     if (isRecord(parsed)) return parsed;
   } catch {
     // Fall through to the standard DataTransfer text payload.
@@ -65,7 +87,7 @@ function collectionDocument(collection, id) {
 
 /** Resolve a dropped document without trusting arbitrary data as a token. */
 export async function resolveDroppedDocument(data, {
-  fromUuid = globalThis?.fromUuid,
+  fromUuid = fromUuidImplementation(),
   game = globalThis?.game
 } = {}) {
   if (!isRecord(data)) return null;
@@ -79,9 +101,20 @@ export async function resolveDroppedDocument(data, {
     }
   }
 
-  if (data.type === "Actor") return collectionDocument(game?.actors, data.id);
-  if (data.type === "Token") return collectionDocument(game?.scenes, data.sceneId)
-    ?.tokens?.get?.(data.id) ?? null;
+  const type = String(data.type ?? data.documentName ?? "").toLowerCase();
+  if (type === "actor") {
+    const actorId = data.id ?? data.actorId ?? uuidPart(uuid, "Actor");
+    return collectionDocument(game?.actors, actorId);
+  }
+  if (type === "token") {
+    const sceneId = data.sceneId ?? uuidPart(uuid, "Scene");
+    const tokenId = data.id ?? data.tokenId ?? uuidPart(uuid, "Token");
+    const scene = collectionDocument(game?.scenes, sceneId);
+    if (!scene || !tokenId) return null;
+    return scene.getEmbeddedDocument?.("Token", tokenId)
+      ?? scene.tokens?.get?.(tokenId)
+      ?? null;
+  }
   return null;
 }
 
@@ -98,7 +131,9 @@ function plainDocument(document) {
 export async function tokenDataForDrop(data, options = {}) {
   if (!isRecord(data)) return null;
 
-  if (data.type === "Actor") {
+  const type = String(data.type ?? data.documentName ?? "").toLowerCase();
+
+  if (type === "actor") {
     const actor = await resolveDroppedDocument(data, options);
     if (!actor) return null;
     if (typeof actor.getTokenDocument === "function") {
@@ -110,7 +145,7 @@ export async function tokenDataForDrop(data, options = {}) {
     return { ...prototype, actorId: actor.id ?? data.id };
   }
 
-  if (data.type === "Token") {
+  if (type === "token") {
     return plainDocument(await resolveDroppedDocument(data, options));
   }
 

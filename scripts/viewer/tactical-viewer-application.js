@@ -31,7 +31,7 @@ import {
   PanelInputController
 } from "./panel-input-controller.js";
 import { snapHeading } from "../model/orientation-math.js";
-import { getTokenPitch } from "../model/token-flags.js";
+import { getTokenDepth, getTokenPitch } from "../model/token-flags.js";
 import { localize, localizeFormat, viewLabel } from "../i18n.js";
 import {
   getViewerDropData,
@@ -98,6 +98,11 @@ function clonePan(pan) {
     x: Number.isFinite(pan?.x) ? pan.x : 0,
     y: Number.isFinite(pan?.y) ? pan.y : 0
   };
+}
+
+function integerDisplayValue(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(Math.round(numeric)) : null;
 }
 
 function isometricView(view) {
@@ -235,8 +240,82 @@ function sceneTokenById(scene, tokenId) {
   return null;
 }
 
+function tokenIdOf(token) {
+  return token?.document?.id ?? token?.id ?? null;
+}
+
+/**
+ * Make a read-through token view for an action whose previous update has not
+ * reached the document collection yet. The update method remains bound to
+ * the real document; only reads are optimistic.
+ */
+function optimisticToken(token, pending = {}) {
+  if (!token || !pending || Object.keys(pending).length === 0) return token;
+  const source = token.document ?? token;
+  const view = Object.create(source);
+  for (const key of ["id", "actorId", "x", "y", "width", "height", "elevation", "rotation", "depth", "locked", "lockRotation"]) {
+    if (source[key] !== undefined) view[key] = source[key];
+  }
+  Object.assign(view, pending);
+  view.document = null;
+  if (source.flags || pending.flags) {
+    view.flags = {
+      ...(source.flags ?? {}),
+      ...(pending.flags ?? {}),
+      [MODULE_ID]: {
+        ...(source.flags?.[MODULE_ID] ?? {}),
+        ...(pending.flags?.[MODULE_ID] ?? {})
+      }
+    };
+  }
+  if (typeof source.update === "function") view.update = source.update.bind(source);
+  if (typeof source.canUserModify === "function") {
+    view.canUserModify = source.canUserModify.bind(source);
+  }
+  view.getFlag = (scope, key) => view.flags?.[scope]?.[key];
+  return view;
+}
+
+function pendingTokenMatchesDocument(document, pending = {}) {
+  const source = document?.document ?? document;
+  if (!source || !pending || Object.keys(pending).length === 0) return false;
+
+  for (const field of ["x", "y", "elevation", "width", "height", "rotation"]) {
+    if (pending[field] !== undefined && source[field] !== pending[field]) return false;
+  }
+  if (pending.depth !== undefined && getTokenDepth(source) !== pending.depth) return false;
+
+  const pendingPitch = pending.flags?.[MODULE_ID]?.pitch;
+  if (pendingPitch !== undefined && getTokenPitch(source) !== pendingPitch) return false;
+  return true;
+}
+
+function collectionValues(collection) {
+  if (!collection) return [];
+  if (Array.isArray(collection)) return collection;
+  if (Array.isArray(collection.contents)) return collection.contents;
+  if (typeof collection.values === "function") return Array.from(collection.values());
+  if (typeof collection[Symbol.iterator] === "function") return Array.from(collection);
+  if (typeof collection === "object") return Object.values(collection);
+  return [];
+}
+
+function actorIdOf(token) {
+  return token?.actorId
+    ?? token?.document?.actorId
+    ?? token?.actor?.id
+    ?? token?.document?.actor?.id
+    ?? null;
+}
+
 function actionMessage(result) {
   if (result?.status === "conflict") return localize("actions.conflict", "Token changed remotely; movement canceled.");
+  if (result?.status === "partial") {
+    return localizeFormat("actions.partialSize", `Updated ${result.updatedCount} of ${result.totalCount} matching scene tokens.`, {
+      updated: result.updatedCount,
+      total: result.totalCount
+    });
+  }
   if (result?.adjusted === true) return localize("actions.adjusted", "Foundry adjusted the token to an accepted position.");
   if (result?.reason === "isometric-movement-disabled") {
     return localize("actions.isometricReadOnly", "Isometric views are read-only; move tokens from an orthographic view.");
@@ -358,6 +437,11 @@ export function createTacticalViewerApplicationClass({
       this.linkControls = {};
       this.inputControllers = [];
       this.panelActionQueues = [];
+      this.pendingMovementTransactions = new Map();
+      // Foundry can deliver the document hook before the Scene collection
+      // exposes the updated document. Keep accepted local changes visible and
+      // usable until the canonical document catches up.
+      this.pendingTokenUpdates = new Map();
       this.attached = false;
       this.shellElement = undefined;
       this.handleDragOver = this.handleDragOver.bind(this);
@@ -441,8 +525,143 @@ export function createTacticalViewerApplicationClass({
     }
 
     getVisibleTacticalStates() {
-      return (this.tacticalStateService?.getVisibleTacticalStates?.(this.scene) ?? [])
+      const states = (this.tacticalStateService?.getVisibleTacticalStates?.(this.scene) ?? [])
         .filter((state) => state?.visibleToCurrentUser === true);
+      return states.map((state) => {
+        const tokenId = state?.tokenId;
+        const document = sceneTokenById(this.scene, tokenId);
+        const pendingBeforeReconcile = this.pendingTokenUpdates.get(tokenId);
+        if (pendingBeforeReconcile && pendingTokenMatchesDocument(document, pendingBeforeReconcile)) {
+          this.pendingTokenUpdates.delete(tokenId);
+          const canonical = typeof this.tacticalStateService?.build === "function"
+            ? this.tacticalStateService.build(document, this.scene)
+            : null;
+          if (canonical?.visibleToCurrentUser === true) return canonical;
+        }
+        const pending = this.pendingTokenUpdates.get(tokenId);
+        if (!pending) return state;
+        const optimistic = optimisticToken(document, pending);
+        const rebuilt = typeof this.tacticalStateService?.build === "function"
+          ? this.tacticalStateService.build(optimistic, this.scene)
+          : null;
+        return rebuilt?.visibleToCurrentUser === true
+          ? rebuilt
+          : { ...state, ...pending };
+      });
+    }
+
+    getActionTokenById(tokenId) {
+      return optimisticToken(
+        this.getTokenById(tokenId),
+        this.pendingTokenUpdates.get(tokenId)
+      );
+    }
+
+    getActionToken(token) {
+      return optimisticToken(token, this.pendingTokenUpdates.get(tokenIdOf(token)));
+    }
+
+    recordPendingTokenUpdate(token, result) {
+      if (result?.status !== "accepted") return;
+      const tokenId = tokenIdOf(token) ?? token?.tokenId;
+      if (tokenId === null || tokenId === undefined) return;
+      // The requested update is the best optimistic value. Use Foundry's
+      // canonical value only when it explicitly adjusted the request.
+      const update = result.adjusted === true
+        ? (result.canonical ?? result.update ?? {})
+        : (result.update ?? result.canonical ?? {});
+      const pending = { ...(this.pendingTokenUpdates.get(tokenId) ?? {}) };
+      for (const field of ["x", "y", "elevation", "width", "height", "rotation", "depth"]) {
+        if (update[field] !== undefined) pending[field] = update[field];
+      }
+      const pitchKey = `flags.${MODULE_ID}.pitch`;
+      const depthKey = `flags.${MODULE_ID}.depth`;
+      const pitch = update.pitch ?? update[pitchKey];
+      const depth = update.depth ?? update[depthKey];
+      if (pitch !== undefined) {
+        pending.flags = {
+          ...(pending.flags ?? {}),
+          [MODULE_ID]: {
+            ...(pending.flags?.[MODULE_ID] ?? {}),
+            pitch
+          }
+        };
+      }
+      if (depth !== undefined) pending.depth = depth;
+      if (Object.keys(pending).length > 0) this.pendingTokenUpdates.set(tokenId, pending);
+    }
+
+    stagePendingTokenFields(token, fields = {}) {
+      const tokenId = tokenIdOf(token);
+      if (tokenId === null || tokenId === undefined) return null;
+      const previous = this.pendingTokenUpdates.get(tokenId);
+      const pending = { ...(previous ?? {}) };
+      let staged = false;
+      for (const field of ["x", "y", "elevation", "width", "height", "depth"]) {
+        if (fields[field] === undefined || !Number.isFinite(Number(fields[field]))) continue;
+        const value = Number(fields[field]);
+        if (["width", "height", "depth"].includes(field)
+          && (!Number.isInteger(value) || value < 1 || value > 20)) continue;
+        pending[field] = value;
+        staged = true;
+      }
+      if (staged) this.pendingTokenUpdates.set(tokenId, pending);
+      return previous;
+    }
+
+    stagePendingTokenDimensions(token, dimensions = {}) {
+      return this.stagePendingTokenFields(token, dimensions);
+    }
+
+    stagePendingMovement({ token, document, preview } = {}) {
+      if (!token || !document || !preview) return null;
+      const updates = {};
+      if (Number.isFinite(preview.position?.x)) updates.x = preview.position.x;
+      if (Number.isFinite(preview.position?.y)) updates.y = preview.position.y;
+      if (Number.isFinite(preview.elevation)) updates.elevation = preview.elevation;
+      if (Number(preview.delta?.z) !== 0 && Number.isFinite(document.elevation)
+        && typeof this.coordinateAdapter?.moveElevationByTacticalDelta === "function") {
+        updates.elevation = this.coordinateAdapter.moveElevationByTacticalDelta(
+          document.elevation,
+          Number(preview.delta.z),
+          this.scene
+        );
+      }
+
+      if (!preview.position && typeof this.coordinateAdapter?.moveByTacticalDelta === "function") {
+        const delta = preview.delta ?? {};
+        try {
+          const position = this.coordinateAdapter.moveByTacticalDelta(document, this.scene, {
+            x: Number(delta.x) || 0,
+            y: Number(delta.y) || 0
+          });
+          if (Number(delta.x) !== 0) updates.x = position.x;
+          if (Number(delta.y) !== 0) updates.y = position.y;
+        } catch {
+          // The movement service remains authoritative if a custom adapter
+          // cannot derive a projected TokenDocument position here.
+        }
+      }
+      const previous = this.stagePendingTokenFields(document, updates);
+      const tokenId = tokenIdOf(token) ?? tokenIdOf(document);
+      if (tokenId !== null && tokenId !== undefined) {
+        this.pendingMovementTransactions.set(tokenId, { token: document, previous });
+      }
+      return previous;
+    }
+
+    restorePendingTokenUpdate(token, previous) {
+      const tokenId = tokenIdOf(token);
+      if (tokenId === null || tokenId === undefined) return;
+      if (previous && Object.keys(previous).length > 0) {
+        this.pendingTokenUpdates.set(tokenId, previous);
+      } else {
+        this.pendingTokenUpdates.delete(tokenId);
+      }
+    }
+
+    clearPendingTokenUpdates(tokenIds = []) {
+      for (const tokenId of tokenIds) this.pendingTokenUpdates.delete(tokenId);
     }
 
     handleDragOver(event) {
@@ -496,21 +715,29 @@ export function createTacticalViewerApplicationClass({
       const local = localDropPoint(event, canvas);
       if (!local) return { status: "rejected", reason: "drop-invalid" };
       try {
+        // Tactical drops always start at the neutral one-cell footprint and
+        // one-cell height. Users can resize the new token afterward.
+        tokenData.width = 1;
+        tokenData.height = 1;
+        tokenData.flags = {
+          ...(tokenData.flags ?? {}),
+          [MODULE_ID]: {
+            ...(tokenData.flags?.[MODULE_ID] ?? {}),
+            enabled: true,
+            depth: 1
+          }
+        };
         const point = this.projectionEngine.inversePoint(local, model.camera, {
           preserve: model.camera.focus
         });
-        const width = Number.isFinite(tokenData.width) && tokenData.width > 0
-          ? tokenData.width
-          : 1;
-        const height = Number.isFinite(tokenData.height) && tokenData.height > 0
-          ? tokenData.height
-          : 1;
+        const width = 1;
+        const height = 1;
         const tokenForPosition = { ...tokenData, width, height, x: 0, y: 0 };
         const grid = model.grid ?? {};
         const columns = Number(grid.columns);
         const rows = Number(grid.rows);
         const depth = Number(grid.depth ?? grid.z);
-        const tokenDepth = Math.max(1, Number(tokenData.depth) || 1);
+        const tokenDepth = 1;
         const boundedPoint = {
           ...point,
           x: Number.isFinite(columns)
@@ -540,7 +767,11 @@ export function createTacticalViewerApplicationClass({
         tokenData.elevation = this.coordinateAdapter.toElevation(boundedPoint.z, this.scene);
         tokenData.flags = {
           ...(tokenData.flags ?? {}),
-          [MODULE_ID]: { ...(tokenData.flags?.[MODULE_ID] ?? {}), enabled: true }
+          [MODULE_ID]: {
+            ...(tokenData.flags?.[MODULE_ID] ?? {}),
+            enabled: true,
+            depth: 1
+          }
         };
         const created = await this.scene.createEmbeddedDocuments("Token", [tokenData]);
         this.refreshFromDocuments({ render: false });
@@ -593,6 +824,11 @@ export function createTacticalViewerApplicationClass({
 
     handleSynchronizationInvalidation(invalidation) {
       const deletedIds = invalidation?.deletedTokenIds ?? [];
+      // A Foundry update hook can be delivered before the Scene collection
+      // exposes the updated document. Keep optimistic fields through that
+      // frame; getVisibleTacticalStates removes them once the canonical
+      // document actually contains the accepted values.
+      this.clearPendingTokenUpdates(deletedIds);
       if (deletedIds.length > 0) {
         const deleted = new Set(deletedIds);
         if (deleted.has(this.viewerState.selectedTokenId)) this.viewerState.selectedTokenId = null;
@@ -668,10 +904,11 @@ export function createTacticalViewerApplicationClass({
         return;
       }
       const label = selected.name || selected.tokenId;
+      const z = integerDisplayValue(selected.tacticalZ) ?? selected.tacticalZ;
       this.selectedTokenReadout.textContent = localizeFormat(
         "viewer.readout.selected",
-        `Selected ${label} · X ${selected.tacticalX} · Y ${selected.tacticalY} · Z ${selected.tacticalZ}`,
-        { label, x: selected.tacticalX, y: selected.tacticalY, z: selected.tacticalZ }
+        `Selected ${label} · X ${selected.tacticalX} · Y ${selected.tacticalY} · Z ${z}`,
+        { label, x: selected.tacticalX, y: selected.tacticalY, z }
       );
     }
 
@@ -1218,11 +1455,16 @@ export function createTacticalViewerApplicationClass({
         }
         const sizeDisabled = selected?.visibleToCurrentUser !== true
           || selected?.canCurrentUserUpdate !== true;
-        for (const [role, value] of [["token-width", selected?.width], ["token-height", selected?.height]]) {
+        for (const [role, value] of [
+          ["token-length", selected?.width],
+          ["token-width", selected?.height],
+          ["token-height", selected?.depth]
+        ]) {
           const control = panelElement.querySelector?.(`[data-role="${role}"]`);
           if (!control) continue;
           control.disabled = sizeDisabled;
-          if (Number.isFinite(value) && value > 0) control.value = String(value);
+          const displayValue = integerDisplayValue(value);
+          if (displayValue !== null && Number(value) > 0) control.value = displayValue;
         }
       });
     }
@@ -1232,7 +1474,18 @@ export function createTacticalViewerApplicationClass({
       this.requestRender({ type: preview ? "movement-preview" : "movement-preview-cleared" });
     }
 
-    handleActionResult(result) {
+    handleActionResult(result, token) {
+      const tokenId = tokenIdOf(token) ?? token?.tokenId;
+      const movementTransaction = tokenId === null || tokenId === undefined
+        ? null
+        : this.pendingMovementTransactions.get(tokenId);
+      if (movementTransaction) {
+        this.pendingMovementTransactions.delete(tokenId);
+        if (result?.status !== "accepted") {
+          this.restorePendingTokenUpdate(movementTransaction.token, movementTransaction.previous);
+        }
+      }
+      this.recordPendingTokenUpdate(token, result);
       this.viewerState.movementPreview = null;
       if (this.actionMessageElement) this.actionMessageElement.textContent = actionMessage(result);
       this.refreshFromDocuments({ render: false });
@@ -1281,7 +1534,7 @@ export function createTacticalViewerApplicationClass({
 
     async commitHeadingBy(delta, panelIndex = 0) {
       const selected = this.getSelectedTacticalState(panelIndex);
-      const document = selected ? this.getTokenById(selected.tokenId) : null;
+      const document = selected ? this.getActionTokenById(selected.tokenId) : null;
       if (!selected || selected.visibleToCurrentUser !== true
         || selected.canCurrentUserRotate !== true
         || !document || typeof this.tacticalUpdateService?.setHeading !== "function") {
@@ -1298,13 +1551,13 @@ export function createTacticalViewerApplicationClass({
         snapHeading(documentHeading) + delta,
         snapshot
       );
-      this.handleActionResult(result);
+      this.handleActionResult(result, document);
       return result;
     }
 
     async setPitchTo(pitch, panelIndex = 0) {
       const selected = this.getSelectedTacticalState(panelIndex);
-      const document = selected ? this.getTokenById(selected.tokenId) : null;
+      const document = selected ? this.getActionTokenById(selected.tokenId) : null;
       if (!selected || selected.visibleToCurrentUser !== true
         || selected.canCurrentUserRotate !== true
         || !document || typeof this.tacticalUpdateService?.setPitch !== "function") {
@@ -1312,7 +1565,7 @@ export function createTacticalViewerApplicationClass({
       }
       const snapshot = this.tacticalUpdateService.captureInteractionSnapshot(document);
       const result = await this.tacticalUpdateService.setPitch(document, pitch, snapshot);
-      this.handleActionResult(result);
+      this.handleActionResult(result, document);
       return result;
     }
 
@@ -1327,7 +1580,7 @@ export function createTacticalViewerApplicationClass({
 
     async commitPitchBy(delta, panelIndex = 0) {
       const selected = this.getSelectedTacticalState(panelIndex);
-      const document = selected ? this.getTokenById(selected.tokenId) : null;
+      const document = selected ? this.getActionTokenById(selected.tokenId) : null;
       const documentPitch = document ? getTokenPitch(document) : selected?.pitch;
       const currentIndex = ALLOWED_PITCHES.indexOf(documentPitch);
       if (currentIndex < 0) return null;
@@ -1338,7 +1591,7 @@ export function createTacticalViewerApplicationClass({
 
     async setSelectedTokenSize(width, height, panelIndex = 0) {
       const selected = this.getSelectedTacticalState(panelIndex);
-      const document = selected ? this.getTokenById(selected.tokenId) : null;
+      const document = selected ? this.getActionTokenById(selected.tokenId) : null;
       if (!selected || selected.visibleToCurrentUser !== true
         || selected.canCurrentUserUpdate !== true
         || !document || typeof this.tacticalUpdateService?.setSize !== "function") {
@@ -1347,33 +1600,113 @@ export function createTacticalViewerApplicationClass({
       const snapshot = typeof this.tacticalUpdateService.captureSizeSnapshot === "function"
         ? this.tacticalUpdateService.captureSizeSnapshot(document)
         : { width: document.width, height: document.height };
+      const previousPending = this.stagePendingTokenDimensions(document, { width, height });
+      this.refreshFromDocuments({ render: false });
+      this.requestRender({ type: "tactical-size-preview" });
       const result = await this.tacticalUpdateService.setSize(document, width, height, snapshot);
+      if (result?.status === "accepted") this.recordPendingTokenUpdate(document, result);
+      else this.restorePendingTokenUpdate(document, previousPending);
+      this.handleActionResult(result, document);
+      return result;
+    }
+
+    selectedTokenDocuments(document) {
+      const selectedActorId = actorIdOf(document);
+      const scenes = collectionValues(globalThis?.game?.scenes).slice();
+      if (!scenes.includes(this.scene)) scenes.push(this.scene);
+      const targets = [];
+      const seen = new Set();
+      for (const scene of scenes) {
+        for (const token of collectionValues(scene?.tokens)) {
+          if (selectedActorId !== null && actorIdOf(token) !== selectedActorId) continue;
+          if (selectedActorId === null && token !== document) continue;
+          const tokenId = token?.uuid ?? token?.id ?? token;
+          if (seen.has(tokenId)) continue;
+          seen.add(tokenId);
+          targets.push(token);
+        }
+      }
+      const selectedId = tokenIdOf(document);
+      if (!targets.some((target) => tokenIdOf(target) === selectedId)) {
+        targets.unshift(document);
+      }
+      return targets;
+    }
+
+    async setSelectedTokenDimensions(dimensions, panelIndex = 0) {
+      const selected = this.getSelectedTacticalState(panelIndex);
+      const document = selected ? this.getActionTokenById(selected.tokenId) : null;
+      if (!selected || selected.visibleToCurrentUser !== true
+        || selected.canCurrentUserUpdate !== true
+        || !document) return null;
+
+      const targets = this.selectedTokenDocuments(document)
+        .map((target) => this.getActionToken(target));
+      const transactions = targets.map((target) => {
+        const snapshot = typeof this.tacticalUpdateService?.captureSizeSnapshot === "function"
+          ? this.tacticalUpdateService.captureSizeSnapshot(target)
+          : { width: target.width, height: target.height, depth: target.depth ?? 1 };
+        return {
+          target,
+          snapshot,
+          previousPending: this.stagePendingTokenDimensions(target, dimensions)
+        };
+      });
+      this.refreshFromDocuments({ render: false });
+      this.requestRender({ type: "tactical-size-preview" });
+
+      const results = await Promise.all(transactions.map(async ({ target, snapshot, previousPending }) => {
+        let result;
+        if (typeof this.tacticalUpdateService?.setDimensions === "function") {
+          result = await this.tacticalUpdateService.setDimensions(target, dimensions, snapshot);
+        } else if (Object.keys(dimensions).length === 1
+          && typeof this.tacticalUpdateService?.setDimension === "function") {
+          const [dimension] = Object.keys(dimensions);
+          result = await this.tacticalUpdateService.setDimension(
+            target,
+            dimension,
+            dimensions[dimension],
+            snapshot
+          );
+        } else if (typeof this.tacticalUpdateService?.setSize === "function"
+          && !Object.hasOwn(dimensions, "depth")) {
+          const lengthControl = this.panelElements[panelIndex]
+            ?.querySelector?.('[data-role="token-length"]');
+          const widthControl = this.panelElements[panelIndex]
+            ?.querySelector?.('[data-role="token-width"]');
+          result = await this.tacticalUpdateService.setSize(
+            target,
+            dimensions.width ?? lengthControl?.value ?? selected.width,
+            dimensions.height ?? widthControl?.value ?? selected.height,
+            snapshot
+          );
+        } else {
+          result = { status: "rejected", reason: "invalid-size" };
+        }
+        if (result?.status === "accepted") this.recordPendingTokenUpdate(target, result);
+        else this.restorePendingTokenUpdate(target, previousPending);
+        return result;
+      }));
+
+      const accepted = results.filter((result) => result?.status === "accepted");
+      const firstFailure = results.find((result) => result?.status !== "accepted");
+      const result = {
+        ...(accepted.length === results.length
+          ? { status: "accepted", ok: true }
+          : accepted.length > 0
+            ? { status: "partial", ok: false }
+            : (firstFailure ?? { status: "rejected", reason: "invalid-size" })),
+        updatedCount: accepted.length,
+        totalCount: results.length,
+        results
+      };
       this.handleActionResult(result);
       return result;
     }
 
     async setSelectedTokenDimension(dimension, value, panelIndex = 0) {
-      const selected = this.getSelectedTacticalState(panelIndex);
-      const document = selected ? this.getTokenById(selected.tokenId) : null;
-      if (!["width", "height"].includes(dimension)
-        || !selected || selected.visibleToCurrentUser !== true
-        || selected.canCurrentUserUpdate !== true
-        || !document) return null;
-      const snapshot = typeof this.tacticalUpdateService.captureSizeSnapshot === "function"
-        ? this.tacticalUpdateService.captureSizeSnapshot(document)
-        : { width: document.width, height: document.height };
-      if (typeof this.tacticalUpdateService.setDimension !== "function") {
-        return this.setSelectedTokenSize(
-          dimension === "width" ? value : this.panelElements[panelIndex]
-            ?.querySelector?.('[data-role="token-width"]')?.value ?? selected.width,
-          dimension === "height" ? value : this.panelElements[panelIndex]
-            ?.querySelector?.('[data-role="token-height"]')?.value ?? selected.height,
-          panelIndex
-        );
-      }
-      const result = await this.tacticalUpdateService.setDimension(document, dimension, value, snapshot);
-      this.handleActionResult(result);
-      return result;
+      if (!["width", "height", "depth"].includes(dimension)) return null;
+      return this.setSelectedTokenDimensions({ [dimension]: value }, panelIndex);
     }
 
     async deleteSelectedToken(panelIndex = 0) {
@@ -1408,13 +1741,14 @@ export function createTacticalViewerApplicationClass({
         scene: this.scene,
         coordinateAdapter: this.coordinateAdapter,
         tacticalUpdateService: this.tacticalUpdateService,
-        getTokenById: (tokenId) => this.getTokenById(tokenId),
+        getTokenById: (tokenId) => this.getActionTokenById(tokenId),
         onSelectionChanged: (tokenId) => this.handleSelectionChanged(tokenId, index),
         onSelectionBoxChanged: (selectionBox) => this.handleSelectionBoxChanged(selectionBox, index),
         onOverlapChooser: (candidates) => this.showOverlapChooser(index, candidates),
         onViewChanged: (change) => this.handlePanelViewChanged(index, change),
         onMovementPreview: (preview) => this.handleMovementPreview(preview),
-        onActionResult: (result) => this.handleActionResult(result),
+        onMovementCommit: (details) => this.stagePendingMovement(details),
+        onActionResult: (result, token) => this.handleActionResult(result, token),
         onDeleteToken: () => this.deleteSelectedToken(index),
         getSelectedTokenState: () => this.getSelectedTacticalState(index),
         // The controller already serializes shortcut actions. Call the
@@ -1685,10 +2019,10 @@ export function createTacticalViewerApplicationClass({
         opacityLabel.append(opacity, opacityValue);
         options.appendChild(opacityLabel);
         const gridStyleLabel = this.domDocument.createElement("label");
-        gridStyleLabel.textContent = localize("viewer.gridStyle", "Grid lines");
+        gridStyleLabel.textContent = localize("viewer.gridStyle.label", "Grid lines");
         const gridStyle = this.domDocument.createElement("select");
         setRole(gridStyle, "grid-style");
-        gridStyle.setAttribute?.("aria-label", `${localize("viewer.gridStyle", "Grid lines")} (${index + 1})`);
+        gridStyle.setAttribute?.("aria-label", `${localize("viewer.gridStyle.label", "Grid lines")} (${index + 1})`);
         for (const style of GRID_LINE_STYLES) {
           const option = this.domDocument.createElement("option");
           option.value = style;
@@ -1705,9 +2039,10 @@ export function createTacticalViewerApplicationClass({
         tokenSizeLabel.textContent = localize("viewer.tokenSize", "Selected token size");
         addClass(tokenSizeLabel, "tactical-viewer-token-size-label");
         options.appendChild(tokenSizeLabel);
-        for (const [role, labelText] of [
-          ["token-width", localize("viewer.tokenWidth", "Width")],
-          ["token-height", localize("viewer.tokenHeight", "Height")]
+        for (const [role, labelText, dimension] of [
+          ["token-length", localize("viewer.tokenLength", "Length"), "width"],
+          ["token-width", localize("viewer.tokenWidth", "Width"), "height"],
+          ["token-height", localize("viewer.tokenHeight", "Height"), "depth"]
         ]) {
           const sizeLabel = this.domDocument.createElement("label");
           sizeLabel.textContent = labelText;
@@ -1720,11 +2055,12 @@ export function createTacticalViewerApplicationClass({
           setRole(sizeInput, role);
           sizeInput.setAttribute?.("aria-label", `${labelText} (${index + 1})`);
           sizeInput.addEventListener?.("change", () => {
-            void this.setSelectedTokenDimension(
-              role === "token-width" ? "width" : "height",
-              sizeInput.value,
-              index
-            );
+            const value = sizeInput.value;
+            // Size edits can arrive back-to-back before Foundry emits either
+            // update hook. Serialize them so each field is based on the
+            // previous accepted local value, without coupling the fields.
+            void this.enqueuePanelAction(index, () =>
+              this.setSelectedTokenDimension(dimension, value, index));
           });
           sizeLabel.appendChild(sizeInput);
           options.appendChild(sizeLabel);
@@ -2043,6 +2379,11 @@ export function createTacticalViewerApplicationClass({
     renderViewport() {
       const visibleTacticalStates = this.refreshFromDocuments({ render: false });
       this.updateSelectedTokenReadout(visibleTacticalStates);
+      this.renderer?.preloadArt?.(
+        visibleTacticalStates,
+        [...new Set(this.viewerState.panels.map((panel) => panel.view))],
+        { invalidate: (invalidation) => this.requestRender(invalidation) }
+      );
       for (let panelIndex = 0; panelIndex < this.viewerState.panelCount; panelIndex += 1) {
         const canvas = this.canvases[panelIndex];
         if (!canvas) continue;

@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AssetManager,
   GENERIC_ASSET_PATHS,
+  SHIP_ART_DIRECTORY,
+  getAutomaticTacticalArtCandidates,
   getTacticalArtCandidates
 } from "../../scripts/rendering/asset-manager.js";
 
@@ -22,6 +24,71 @@ function art(overrides = {}) {
 }
 
 describe("tactical artwork resolution", () => {
+  it("discovers ship actor-name views in the module ship-art directory", () => {
+    expect(getAutomaticTacticalArtCandidates({
+      actorName: "The Spelljammer",
+      textureSource: "worlds/demo/ships/base.webp"
+    }, "top")).toEqual([
+      { source: `${SHIP_ART_DIRECTORY}/the-spelljammer-top.webp`, mirrored: false, level: "automatic-view" },
+      { source: `${SHIP_ART_DIRECTORY}/the-spelljammer-top.png`, mirrored: false, level: "automatic-view" },
+      { source: `${SHIP_ART_DIRECTORY}/the-spelljammer-top.svg`, mirrored: false, level: "automatic-view" },
+      { source: `${SHIP_ART_DIRECTORY}/the-spelljammer-top.gif`, mirrored: false, level: "automatic-view" }
+    ]);
+  });
+
+  it("uses the ship-art directory even when token and Actor textures differ", () => {
+    expect(getAutomaticTacticalArtCandidates({
+      actorName: "The Spelljammer",
+      textureSource: "icons/tokens/base.webp",
+      actorTextureSource: "worlds/demo/ships/actor.webp"
+    }, "isometric").map(({ source }) => source)).toEqual([
+      `${SHIP_ART_DIRECTORY}/the-spelljammer-isometric.webp`,
+      `${SHIP_ART_DIRECTORY}/the-spelljammer-isometric.png`,
+      `${SHIP_ART_DIRECTORY}/the-spelljammer-isometric.svg`,
+      `${SHIP_ART_DIRECTORY}/the-spelljammer-isometric.gif`
+    ]);
+  });
+
+  it("tries automatic views before the native texture and generic fallbacks", async () => {
+    const sources = [];
+    const manager = new AssetManager({
+      imageFactory: async (source) => {
+        sources.push(source);
+        if (source.endsWith("the-spelljammer-top.png")) return image(source);
+        throw new Error("missing");
+      },
+      resolvePath: (source) => source
+    });
+
+    const result = await manager.loadArt({
+      actorName: "The Spelljammer",
+      textureSource: "worlds/demo/ships/base.webp",
+      preset: "generic-ship"
+    }, "top");
+
+    expect(result).toMatchObject({
+      source: `${SHIP_ART_DIRECTORY}/the-spelljammer-top.png`,
+      level: "automatic-view"
+    });
+    expect(sources).toEqual([
+      `${SHIP_ART_DIRECTORY}/the-spelljammer-top.webp`,
+      `${SHIP_ART_DIRECTORY}/the-spelljammer-top.png`
+    ]);
+  });
+
+  it("honors an explicit ship-art directory", () => {
+    expect(getAutomaticTacticalArtCandidates({
+      actorName: "The Spelljammer",
+      preset: "generic-ship",
+      directory: "worlds/custom-ships"
+    }, "front").map(({ source }) => source)).toEqual([
+      "worlds/custom-ships/the-spelljammer-front.webp",
+      "worlds/custom-ships/the-spelljammer-front.png",
+      "worlds/custom-ships/the-spelljammer-front.svg",
+      "worlds/custom-ships/the-spelljammer-front.gif"
+    ]);
+  });
+
   it("returns the strict exact, mirrored, primary, preset, marker fallback chain", () => {
     expect(getTacticalArtCandidates(art({
       views: { south: "icons/south.webp", north: "icons/north.webp" },

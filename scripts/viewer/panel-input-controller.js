@@ -138,6 +138,7 @@ export class PanelInputController {
     onSelectionBoxChanged,
     onViewChanged,
     onMovementPreview,
+    onMovementCommit,
     onActionResult,
     onDeleteToken,
     onHeadingDelta,
@@ -166,6 +167,7 @@ export class PanelInputController {
     this.onSelectionBoxChanged = onSelectionBoxChanged;
     this.onViewChanged = onViewChanged;
     this.onMovementPreview = onMovementPreview;
+    this.onMovementCommit = onMovementCommit;
     this.onActionResult = onActionResult;
     this.onDeleteToken = onDeleteToken;
     this.onHeadingDelta = onHeadingDelta;
@@ -499,8 +501,8 @@ export class PanelInputController {
     const snapshot = this.dragSnapshot;
     const token = this.dragToken;
     const position = preview?.position;
-    this.clearDragState();
     const definition = orthographicDefinition(this.projectionEngine, this.currentCamera().view);
+    this.clearDragState();
     const result = await this.commitMovementDelta(preview?.delta, {
       document,
       token,
@@ -534,6 +536,17 @@ export class PanelInputController {
     if (!delta || !document || !move) {
       return null;
     }
+
+    this.onMovementCommit?.({
+      token,
+      document,
+      definition,
+      preview: {
+        tokenId: token?.tokenId,
+        delta,
+        ...(position ? { position } : {})
+      }
+    });
 
     const result = absoluteXY
       ? await move(document, this.scene, position, snapshot)

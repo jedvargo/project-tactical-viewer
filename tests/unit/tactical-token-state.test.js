@@ -19,6 +19,7 @@ function makeDocument({
   depth,
   elevation = 0,
   rotation = 180,
+  actor,
   flags = {}
 } = {}) {
   return {
@@ -28,6 +29,7 @@ function makeDocument({
     width,
     height,
     ...(depth === undefined ? {} : { depth }),
+    ...(actor === undefined ? {} : { actor }),
     elevation,
     rotation,
     flags,
@@ -95,6 +97,7 @@ describe("TacticalTokenState", () => {
 
   it("builds the complete placed-token state, including anchor, off-grid, orientation, and dimensions", () => {
     const { scene, token } = makeStateFixture({
+      actor: { name: "The Spelljammer", img: "worlds/demo/ships/actor.webp" },
       width: 3,
       height: 2,
       depth: 4,
@@ -117,6 +120,8 @@ describe("TacticalTokenState", () => {
     expect(state).toMatchObject({
       tokenId: "placed",
       sceneId: "scene-1",
+      actorName: "The Spelljammer",
+      actorTextureSource: "worlds/demo/ships/actor.webp",
       centerX: token.x + 150,
       centerY: token.y + 100,
       tacticalX: 4.5,

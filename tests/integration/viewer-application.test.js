@@ -518,6 +518,9 @@ describe("TacticalViewerApplication", () => {
       x: 200,
       y: 100,
       elevation: 0,
+      width: 1,
+      height: 1,
+      flags: { "tactical-3d-viewer": { enabled: true, depth: 1 } },
       texture: { src: "icons/ship.webp" }
     });
     expect(coordinateAdapter.toTokenPosition).toHaveBeenCalled();
@@ -857,19 +860,20 @@ describe("TacticalViewerApplication", () => {
     expect(tacticalUpdateService.setPitch).toHaveBeenCalled();
   });
 
-  it("exposes selected token width and height controls and commits a 2x1 footprint", async () => {
+  it("exposes independent selected token length, width, and height controls", async () => {
     const scheduler = createScheduler();
     const document = createFakeDocument();
-    const tokenDocument = { id: "ship", width: 1, height: 1 };
+    const tokenDocument = { id: "ship", width: 1, height: 1, depth: 1 };
     const tacticalUpdateService = {
-      captureSizeSnapshot: vi.fn(() => ({ width: 1, height: 1 })),
-      setSize: vi.fn(async () => ({ status: "accepted", ok: true }))
+      captureSizeSnapshot: vi.fn(() => ({ width: 1, height: 1, depth: 1 })),
+      setDimensions: vi.fn(async () => ({ status: "accepted", ok: true }))
     };
     const tacticalStateService = {
       getVisibleTacticalStates: vi.fn(() => [{
         tokenId: "ship",
         width: 1,
         height: 1,
+        depth: 1,
         visibleToCurrentUser: true,
         canCurrentUserUpdate: true
       }])
@@ -889,22 +893,218 @@ describe("TacticalViewerApplication", () => {
     await application.render(true);
     application.viewerState.selectedTokenId = "ship";
     application.updateInteractionControls();
+    const length = application.element.querySelector('[data-role="token-length"]');
     const width = application.element.querySelector('[data-role="token-width"]');
     const height = application.element.querySelector('[data-role="token-height"]');
 
+    expect(length).not.toBeNull();
     expect(width).not.toBeNull();
     expect(height).not.toBeNull();
+    expect(length.disabled).toBe(false);
     expect(width.disabled).toBe(false);
-    width.value = "2";
+    length.value = "2";
     height.value = "1";
-    width.dispatchEvent({ type: "change" });
+    length.dispatchEvent({ type: "change" });
 
     expect(tacticalUpdateService.captureSizeSnapshot).toHaveBeenCalledWith(tokenDocument);
-    expect(tacticalUpdateService.setSize).toHaveBeenCalledWith(
+    expect(tacticalUpdateService.setDimensions).toHaveBeenCalledWith(
       tokenDocument,
-      "2",
-      "1",
-      { width: 1, height: 1 }
+      { width: "2" },
+      { width: 1, height: 1, depth: 1 }
+    );
+  });
+
+  it("keeps an accepted size visible until the canonical document catches up", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const tokenDocument = { id: "ship", width: 1, height: 1, depth: 1 };
+    const tacticalUpdateService = {
+      captureSizeSnapshot: vi.fn((token) => ({
+        width: token.width,
+        height: token.height,
+        depth: token.depth
+      })),
+      setDimensions: vi.fn(async (_token, dimensions) => ({
+        status: "accepted",
+        ok: true,
+        update: { width: Number(dimensions.width) }
+      }))
+    };
+    const tacticalStateService = {
+      getVisibleTacticalStates: vi.fn(() => [{
+        tokenId: tokenDocument.id,
+        width: tokenDocument.width,
+        height: tokenDocument.height,
+        depth: tokenDocument.depth,
+        visibleToCurrentUser: true,
+        canCurrentUserUpdate: true
+      }])
+    };
+    let invalidate;
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: { ...createScene(), tokens: [tokenDocument] },
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: {
+        subscribe: (listener) => {
+          invalidate = listener;
+          return () => {};
+        }
+      },
+      tacticalStateService,
+      tacticalUpdateService,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    application.viewerState.selectedTokenId = tokenDocument.id;
+    application.updateInteractionControls();
+    await application.setSelectedTokenDimension("width", "2");
+
+    const length = application.element.querySelector('[data-role="token-length"]');
+    expect(length.value).toBe("2");
+
+    invalidate({ type: "token-invalidation", tokenIds: [tokenDocument.id] });
+    scheduler.flush();
+    expect(length.value).toBe("2");
+
+    tokenDocument.width = 2;
+    invalidate({ type: "token-invalidation", tokenIds: [tokenDocument.id] });
+    scheduler.flush();
+    expect(length.value).toBe("2");
+    expect(application.pendingTokenUpdates.has(tokenDocument.id)).toBe(false);
+  });
+
+  it("captures each queued size edit when the change event occurs", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const tokenDocument = { id: "ship", width: 1, height: 1, depth: 1 };
+    let resolveFirst;
+    const widths = [];
+    const tacticalUpdateService = {
+      captureSizeSnapshot: vi.fn((token) => ({
+        width: token.width,
+        height: token.height,
+        depth: token.depth
+      })),
+      setDimensions: vi.fn((_token, dimensions) => {
+        const width = Number(dimensions.width);
+        widths.push(width);
+        if (widths.length === 1) {
+          return new Promise((resolve) => {
+            resolveFirst = () => resolve({
+              status: "accepted",
+              ok: true,
+              update: { width }
+            });
+          });
+        }
+        return Promise.resolve({ status: "accepted", ok: true, update: { width } });
+      })
+    };
+    const tacticalStateService = {
+      getVisibleTacticalStates: vi.fn(() => [{
+        tokenId: tokenDocument.id,
+        width: tokenDocument.width,
+        height: tokenDocument.height,
+        depth: tokenDocument.depth,
+        visibleToCurrentUser: true,
+        canCurrentUserUpdate: true
+      }])
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene: { ...createScene(), tokens: [tokenDocument] },
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      tacticalStateService,
+      tacticalUpdateService,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    application.viewerState.selectedTokenId = tokenDocument.id;
+    application.updateInteractionControls();
+    const length = application.element.querySelector('[data-role="token-length"]');
+    length.value = "2";
+    length.dispatchEvent({ type: "change" });
+    length.value = "3";
+    length.dispatchEvent({ type: "change" });
+
+    expect(widths).toEqual([2]);
+    resolveFirst();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(widths).toEqual([2, 3]);
+  });
+
+  it("applies selected actor token dimensions across loaded Scenes", async () => {
+    const scheduler = createScheduler();
+    const document = createFakeDocument();
+    const currentToken = { id: "ship-current", actorId: "actor-1", width: 1, height: 1, depth: 1 };
+    const otherSceneToken = { id: "ship-other", actorId: "actor-1", width: 1, height: 1, depth: 1 };
+    const unrelatedToken = { id: "other", actorId: "actor-2", width: 1, height: 1, depth: 1 };
+    const scene = { ...createScene(), tokens: [currentToken] };
+    const otherScene = {
+      id: "scene-2",
+      name: "Other Battlefield",
+      tokens: [otherSceneToken, unrelatedToken]
+    };
+    vi.stubGlobal("game", { scenes: [scene, otherScene] });
+    const tacticalUpdateService = {
+      captureSizeSnapshot: vi.fn((token) => ({
+        width: token.width,
+        height: token.height,
+        depth: token.depth
+      })),
+      setDimensions: vi.fn(async () => ({ status: "accepted", ok: true }))
+    };
+    const tacticalStateService = {
+      getVisibleTacticalStates: vi.fn(() => [{
+        tokenId: currentToken.id,
+        width: 1,
+        height: 1,
+        depth: 1,
+        visibleToCurrentUser: true,
+        canCurrentUserUpdate: true
+      }])
+    };
+    const Application = createTacticalViewerApplicationClass({ ApplicationV2: FakeApplicationV2 });
+    const application = new Application({
+      scene,
+      persistenceService: { getSceneLayout: () => ({ panelCount: 1, panels: [{ view: "top" }] }) },
+      synchronizationCoordinator: { subscribe: () => () => {} },
+      tacticalStateService,
+      tacticalUpdateService,
+      document,
+      scheduler,
+      devicePixelRatio: 1
+    });
+
+    await application.render(true);
+    application.viewerState.selectedTokenId = currentToken.id;
+    application.updateInteractionControls();
+    const length = application.element.querySelector('[data-role="token-length"]');
+    expect(application.selectedTokenDocuments(currentToken)).toHaveLength(2);
+    length.value = "3";
+    length.dispatchEvent({ type: "change" });
+
+    expect(tacticalUpdateService.setDimensions).toHaveBeenCalledTimes(2);
+    expect(tacticalUpdateService.setDimensions).toHaveBeenNthCalledWith(
+      1,
+      currentToken,
+      { width: "3" },
+      { width: 1, height: 1, depth: 1 }
+    );
+    expect(tacticalUpdateService.setDimensions).toHaveBeenNthCalledWith(
+      2,
+      otherSceneToken,
+      { width: "3" },
+      { width: 1, height: 1, depth: 1 }
     );
   });
 

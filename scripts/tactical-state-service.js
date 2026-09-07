@@ -1,3 +1,5 @@
+import { debugTokenUsage } from "./debug.js";
+
 function tokenArray(source) {
   if (!source) return [];
   if (Array.isArray(source)) return source;
@@ -38,18 +40,69 @@ export class TacticalStateService {
       tokens,
       ...stateOptions
     } = Array.isArray(options) ? { tokens: options } : options;
+    const sourceTokens = sceneTokens(scene, tokens);
     const states = [];
+    debugTokenUsage("state-scan", {
+      sceneId: scene?.id ?? null,
+      sourceTokenCount: sourceTokens.length,
+      suppliedTokenCount: tokens === undefined ? null : sourceTokens.length,
+      sourceTokens: sourceTokens.map((tokenDocument) => ({
+        tokenId: tokenDocument?.document?.id ?? tokenDocument?.id ?? null,
+        tokenName: tokenDocument?.document?.name ?? tokenDocument?.name ?? ""
+      }))
+    });
 
-    for (const tokenDocument of sceneTokens(scene, tokens)) {
+    for (const tokenDocument of sourceTokens) {
+      const tokenId = tokenDocument?.document?.id ?? tokenDocument?.id ?? null;
+      const tokenName = tokenDocument?.document?.name ?? tokenDocument?.name ?? "";
       // Filter before state construction so hidden token state never reaches
       // a renderer-facing collection or an overlap/hit-test consumer.
-      if (!this.visibilityService.isVisible(tokenDocument, stateOptions)) continue;
+      const visible = this.visibilityService.isVisible(tokenDocument, stateOptions);
+      if (!visible) {
+        debugTokenUsage("state-skip", {
+          tokenId,
+          tokenName,
+          reason: "not-visible"
+        });
+        continue;
+      }
       const state = this.build(tokenDocument, scene, stateOptions);
-      if (state.participating !== true) continue;
-      if (state.visibleToCurrentUser !== true) continue;
+      if (state.participating !== true) {
+        debugTokenUsage("state-skip", {
+          tokenId: state.tokenId ?? tokenId,
+          tokenName: state.name || tokenName,
+          reason: "not-participating",
+          enabled: state.enabled,
+          participating: state.participating
+        });
+        continue;
+      }
+      if (state.visibleToCurrentUser !== true) {
+        debugTokenUsage("state-skip", {
+          tokenId: state.tokenId ?? tokenId,
+          tokenName: state.name || tokenName,
+          reason: "state-not-visible",
+          visibleToCurrentUser: state.visibleToCurrentUser
+        });
+        continue;
+      }
+      debugTokenUsage("state-accepted", {
+        tokenId: state.tokenId ?? tokenId,
+        tokenName: state.name || tokenName,
+        actorName: state.actorName,
+        textureSource: state.textureSource,
+        actorTextureSource: state.actorTextureSource,
+        enabled: state.enabled,
+        participating: state.participating
+      });
       states.push(state);
     }
 
+    debugTokenUsage("state-scan-complete", {
+      sceneId: scene?.id ?? null,
+      acceptedTokenCount: states.length,
+      acceptedTokenIds: states.map((state) => state.tokenId)
+    });
     return Object.freeze(states);
   }
 }

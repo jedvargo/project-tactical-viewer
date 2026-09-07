@@ -2,8 +2,12 @@ import { MODULE_ID } from "./constants.js";
 import { CoordinateAdapter } from "./model/coordinate-adapter.js";
 import { ElevationAdapter } from "./model/elevation-adapter.js";
 import { OrientationAdapter } from "./model/orientation-adapter.js";
-import { getTokenPitch } from "./model/token-flags.js";
-import { buildTokenFlagUpdate } from "./model/token-flags.js";
+import {
+  buildTokenFlagUpdate,
+  getTokenDepth,
+  getTokenPitch,
+  TOKEN_DEPTH_FLAG
+} from "./model/token-flags.js";
 import { PermissionService } from "./permission-service.js";
 
 const UPDATE_ACTIONS = Object.freeze({
@@ -28,15 +32,35 @@ function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+function depthUpdateKey(tokenOrPlaceable) {
+  // Keep tactical height in the module namespace. Foundry versions or game
+  // systems may expose a native/default `depth` value that would otherwise
+  // overwrite the user-selected tactical height during state refresh.
+  void tokenOrPlaceable;
+  return `flags.${MODULE_ID}.${TOKEN_DEPTH_FLAG}`;
+}
+
+function updateFieldName(key) {
+  if (key === `flags.${MODULE_ID}.pitch`) return "pitch";
+  if (key === `flags.${MODULE_ID}.${TOKEN_DEPTH_FLAG}`) return "depth";
+  return key;
+}
+
+function updateKeyForField(tokenOrPlaceable, field) {
+  return field === "depth" ? depthUpdateKey(tokenOrPlaceable) : field;
+}
+
 function canonicalValue(document, field) {
-  if (field === "pitch") return getTokenPitch(document);
-  return document?.[field];
+  const source = documentOf(document);
+  if (field === "pitch") return getTokenPitch(source);
+  if (field === "depth") return getTokenDepth(source);
+  return source?.[field];
 }
 
 function canonicalFields(document, update) {
   const fields = {};
   for (const [key, value] of Object.entries(update)) {
-    const field = key === `flags.${MODULE_ID}.pitch` ? "pitch" : key;
+    const field = updateFieldName(key);
     fields[field] = canonicalValue(document, field);
   }
   return fields;
@@ -85,6 +109,7 @@ function deltaFor(delta, axes) {
 function currentField(tokenOrPlaceable, field) {
   const document = documentOf(tokenOrPlaceable);
   if (field === "pitch") return getTokenPitch(document);
+  if (field === "depth") return getTokenDepth(document);
   return document?.[field];
 }
 
@@ -129,7 +154,8 @@ export class TacticalUpdateService {
   captureSizeSnapshot(tokenOrPlaceable) {
     return Object.freeze({
       width: currentField(tokenOrPlaceable, "width"),
-      height: currentField(tokenOrPlaceable, "height")
+      height: currentField(tokenOrPlaceable, "height"),
+      depth: currentField(tokenOrPlaceable, "depth")
     });
   }
 
@@ -190,11 +216,9 @@ export class TacticalUpdateService {
       if (!updatedDocument) return rejected("update-rejected");
       const canonical = canonicalFields(updatedDocument, update);
       const adjustedFields = Object.freeze(Object.entries(update)
-        .map(([key]) => key === `flags.${MODULE_ID}.pitch` ? "pitch" : key)
+        .map(([key]) => updateFieldName(key))
         .filter((field, index, fields) => fields.indexOf(field) === index)
-        .filter((field) => canonical[field] !== update[field === "pitch"
-          ? `flags.${MODULE_ID}.pitch`
-          : field]));
+        .filter((field) => canonical[field] !== update[updateKeyForField(updatedDocument, field)]));
       return result("accepted", {
         update: Object.freeze({ ...update }),
         document: updatedDocument,
@@ -380,11 +404,31 @@ export class TacticalUpdateService {
     });
   }
 
+  async setDimensions(tokenOrPlaceable, dimensions = {}, snapshot) {
+    const update = {};
+    const fields = [];
+    for (const field of ["width", "height", "depth"]) {
+      if (!hasOwn(dimensions, field)) continue;
+      const value = Number(dimensions[field]);
+      if (!Number.isInteger(value) || value < 1 || value > 20) {
+        return rejected("invalid-size");
+      }
+      update[updateKeyForField(tokenOrPlaceable, field)] = value;
+      fields.push(field);
+    }
+    if (fields.length === 0) return rejected("invalid-size");
+    return await this.commit(tokenOrPlaceable, update, {
+      snapshot,
+      fields,
+      action: UPDATE_ACTIONS.CONFIGURE
+    });
+  }
+
   async setDimension(tokenOrPlaceable, dimension, value, snapshot) {
-    if (!["width", "height"].includes(dimension)) return rejected("invalid-size");
+    if (!["width", "height", "depth"].includes(dimension)) return rejected("invalid-size");
     const next = Number(value);
     if (!Number.isInteger(next) || next < 1 || next > 20) return rejected("invalid-size");
-    return await this.commit(tokenOrPlaceable, { [dimension]: next }, {
+    return await this.commit(tokenOrPlaceable, { [updateKeyForField(tokenOrPlaceable, dimension)]: next }, {
       snapshot,
       fields: [dimension],
       action: UPDATE_ACTIONS.CONFIGURE

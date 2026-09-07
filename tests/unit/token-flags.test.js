@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getTacticalTokenFlags,
   getTokenArt,
+  getTokenDepth,
   getTokenParticipation,
   getTokenPitch,
   getTokenSchemaVersion
@@ -64,6 +65,14 @@ describe("tactical token flag access", () => {
       }
     });
     expect(Object.keys(flags.art.views)).toEqual(VIEW_DEFINITIONS.map(({ id }) => id));
+  });
+
+  it("prefers the module tactical height over Foundry's native depth default", () => {
+    const token = tokenWithFlags({
+      [MODULE_ID]: { depth: 6 }
+    });
+    token.depth = 1;
+    expect(getTokenDepth(token)).toBe(6);
   });
 
   it("reads the complete namespaced art configuration without sharing mutable input", () => {

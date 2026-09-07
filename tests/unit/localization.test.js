@@ -100,6 +100,11 @@ function hasPath(source, path) {
 }
 
 describe("English localization", () => {
+  it("does not define a flat key alongside nested grid-style labels", () => {
+    expect(translations["tactical-3d-viewer.viewer.gridStyle"]).toBeUndefined();
+    expect(translations["tactical-3d-viewer.viewer.gridStyle.label"]).toBe("Grid lines");
+  });
+
   it("contains every user-visible release key", () => {
     for (const key of requiredKeys) expect(hasPath(translations, key), key).toBe(true);
   });

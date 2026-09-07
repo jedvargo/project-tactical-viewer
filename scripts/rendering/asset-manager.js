@@ -4,6 +4,7 @@ import {
   VIEW_DEFINITIONS,
   VIEW_ID_ALIASES
 } from "../constants.js";
+import { debugTokenUsage } from "../debug.js";
 
 /** Module-owned static tactical artwork. These are references, not executable data. */
 export const GENERIC_ASSET_PATHS = Object.freeze({
@@ -19,6 +20,26 @@ export const GENERIC_PRESETS = Object.freeze([
   "generic-creature",
   "generic-marker"
 ]);
+
+export const AUTOMATIC_ART_EXTENSIONS = Object.freeze([
+  "webp",
+  "png",
+  "svg",
+  "gif"
+]);
+
+export const AUTOMATIC_ART_VIEW_LABELS = Object.freeze({
+  top: "top",
+  bottom: "bottom",
+  left: "left",
+  right: "right",
+  front: "front",
+  back: "back",
+  isometric: "isometric"
+});
+
+/** Default module-owned directory for actor-name-based ship artwork. */
+export const SHIP_ART_DIRECTORY = "assets/ships";
 
 const PRESET_ALIASES = Object.freeze({
   ship: "ship",
@@ -56,6 +77,10 @@ function artConfig(value) {
     forwardOffset: typeof art.forwardOffset === "number" && Number.isFinite(art.forwardOffset)
       ? art.forwardOffset
       : 0,
+    actorName: typeof art.actorName === "string" ? art.actorName.trim() : "",
+    directory: typeof art.directory === "string" ? art.directory.trim() : "",
+    textureSource: typeof art.textureSource === "string" ? art.textureSource.trim() : "",
+    actorTextureSource: typeof art.actorTextureSource === "string" ? art.actorTextureSource.trim() : "",
     mirror: isRecord(art.mirror) ? art.mirror : {},
     views: isRecord(art.views) ? art.views : {}
   };
@@ -69,6 +94,52 @@ function addCandidate(candidates, seen, source, mirrored, level) {
     mirrored,
     level
   }));
+}
+
+function automaticArtFilenamePart(value) {
+  return typeof value === "string"
+    ? value.trim().toLowerCase()
+      .replace(/[\\/]/g, "-")
+      .replace(/[^\p{L}\p{N}]+/gu, "-")
+      .replace(/^-+|-+$/g, "")
+    : "";
+}
+
+function directoryOf(source) {
+  if (typeof source !== "string") return "";
+  const value = source.trim();
+  const separator = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+  return separator >= 0 ? value.slice(0, separator) : "";
+}
+
+function joinPath(directory, filename) {
+  const base = typeof directory === "string" ? directory.trim().replace(/[\\/]+$/, "") : "";
+  return base ? `${base}/${filename}` : filename;
+}
+
+/** Return actor-name-based sibling image paths for the requested view. */
+export function getAutomaticTacticalArtCandidates(value, view) {
+  const art = artConfig(value);
+  const canonical = canonicalViewId(view);
+  const label = AUTOMATIC_ART_VIEW_LABELS[canonical];
+  const actorName = automaticArtFilenamePart(art.actorName);
+  if (!label || !actorName) return Object.freeze([]);
+
+  const directories = normalizedPreset(art.preset) === "ship"
+    ? [art.directory || SHIP_ART_DIRECTORY]
+    : [...new Set([
+      art.directory,
+      directoryOf(art.textureSource),
+      directoryOf(art.actorTextureSource)
+    ].filter((directory) => directory !== ""))];
+  if (directories.length === 0) directories.push("");
+  return Object.freeze(directories.flatMap((directory) =>
+    AUTOMATIC_ART_EXTENSIONS.map((extension) => Object.freeze({
+      source: joinPath(directory, `${actorName}-${label}.${extension}`),
+      mirrored: false,
+      level: "automatic-view"
+    }))
+  ));
 }
 
 /**
@@ -113,7 +184,11 @@ export function getTacticalArtCandidates(value, view) {
     addCandidate(candidates, seen, art.views[mirror.opposite], true, "mirrored-view");
   }
 
+  for (const candidate of getAutomaticTacticalArtCandidates(art, view)) {
+    addCandidate(candidates, seen, candidate.source, candidate.mirrored, candidate.level);
+  }
   addCandidate(candidates, seen, art.icon, false, "icon");
+  addCandidate(candidates, seen, art.textureSource, false, "texture");
   addCandidate(
     candidates,
     seen,
@@ -136,9 +211,10 @@ function defaultImageFactory() {
 function defaultResolvePath(source) {
   if (/^(?:[a-z][a-z\d+.-]*:|\/\/|\/)/i.test(source)) return source;
 
-  // Module-owned fallback art is relative to the module manifest, while a
-  // native Token texture is relative to Foundry's current document URL.
-  if (source.startsWith("assets/")) {
+  // Module-owned fallback art is relative to the module manifest. User-data
+  // artwork such as assets/ships/ is served from Foundry's Data root and
+  // must instead resolve relative to the current Foundry URL.
+  if (source.startsWith("assets/generic/")) {
     const moduleUrl = globalThis?.game?.modules?.get?.(MODULE_ID)?.url;
     if (typeof moduleUrl === "string" && moduleUrl) {
       return new URL(source, moduleUrl.endsWith("/") ? moduleUrl : `${moduleUrl}/`).href;
@@ -226,7 +302,7 @@ export class AssetManager {
           source: candidate.source,
           mirrored: candidate.mirrored,
           level: candidate.level,
-          forwardOffset: artConfig(art).forwardOffset
+          forwardOffset: candidate.level === "texture" ? 0 : artConfig(art).forwardOffset
         });
       }
     }
@@ -240,23 +316,50 @@ export class AssetManager {
    */
   async loadArt(art, view) {
     const configuration = artConfig(art);
-    for (const candidate of getTacticalArtCandidates(configuration, view)) {
+    const candidates = getTacticalArtCandidates(configuration, view);
+    debugTokenUsage("art-resolution-start", {
+      view,
+      actorName: configuration.actorName,
+      textureSource: configuration.textureSource,
+      actorTextureSource: configuration.actorTextureSource,
+      candidates: candidates.map(({ source, level, mirrored }) => ({ source, level, mirrored }))
+    });
+    for (const candidate of candidates) {
       let value;
       try {
         value = await this.load(candidate.source);
-      } catch {
+      } catch (error) {
+        debugTokenUsage("art-candidate-error", {
+          view,
+          source: candidate.source,
+          level: candidate.level,
+          error: error?.message ?? String(error)
+        });
         value = null;
       }
       if (value) {
+        debugTokenUsage("art-selected", {
+          view,
+          source: candidate.source,
+          level: candidate.level,
+          mirrored: candidate.mirrored
+        });
         return Object.freeze({
           image: value,
           source: candidate.source,
           mirrored: candidate.mirrored,
           level: candidate.level,
-          forwardOffset: configuration.forwardOffset
+          forwardOffset: candidate.level === "texture" ? 0 : configuration.forwardOffset
         });
       }
+      debugTokenUsage("art-candidate-miss", {
+        view,
+        source: candidate.source,
+        level: candidate.level,
+        status: this.getStatus(candidate.source)
+      });
     }
+    debugTokenUsage("art-resolution-failed", { view });
     return null;
   }
 

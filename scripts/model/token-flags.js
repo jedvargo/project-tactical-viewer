@@ -10,6 +10,7 @@ export const TOKEN_FLAG_SCOPE = MODULE_ID;
 export const TOKEN_PARTICIPATION_FLAG = "enabled";
 export const TOKEN_PITCH_FLAG = "pitch";
 export const TOKEN_ART_FLAG = "art";
+export const TOKEN_DEPTH_FLAG = "depth";
 export const TOKEN_SCHEMA_VERSION_FLAG = "schemaVersion";
 
 const DEFAULT_ART = Object.freeze({
@@ -151,6 +152,17 @@ export function getTokenParticipation(documentOrPrototype) {
 export function getTokenPitch(documentOrPrototype) {
   const value = getTokenFlag(documentOrPrototype, TOKEN_PITCH_FLAG, 0);
   return normalizedPitch(value);
+}
+
+/** Read the tactical vertical token extent, including the module fallback field. */
+export function getTokenDepth(documentOrPrototype) {
+  const document = documentOrPrototype?.document ?? documentOrPrototype;
+  const configuredValue = getTokenFlag(documentOrPrototype, TOKEN_DEPTH_FLAG, undefined);
+  const configuredDepth = Number(configuredValue);
+  if (Number.isFinite(configuredDepth) && configuredDepth > 0) return configuredDepth;
+  const nativeDepth = Number(document?.depth);
+  if (Number.isFinite(nativeDepth) && nativeDepth > 0) return nativeDepth;
+  return 1;
 }
 
 /** Read the normalized, defensive tactical-art configuration. */

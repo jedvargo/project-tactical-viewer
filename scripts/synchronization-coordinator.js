@@ -1,4 +1,5 @@
 import { MODULE_ID } from "./constants.js";
+import { debugTokenUsage } from "./debug.js";
 
 const TOKEN_EVENTS = Object.freeze([
   "moveToken",
@@ -202,21 +203,39 @@ export class SynchronizationCoordinator {
   }
 
   handleMovement(document) {
+    debugTokenUsage("hook-moveToken", {
+      tokenId: documentId(document),
+      tokenName: document?.name ?? ""
+    });
     this.enqueue(document, ["movement"], MOVEMENT_FIELDS);
   }
 
   handleUpdate(document, changed) {
     const update = classifyUpdate(changed);
+    debugTokenUsage("hook-updateToken", {
+      tokenId: documentId(document),
+      tokenName: document?.name ?? "",
+      changedFields: update.paths,
+      reasons: update.reasons
+    });
     if (update.reasons.length === 0) return false;
     this.enqueue(document, update.reasons, update.paths);
     return true;
   }
 
   handleCreation(document) {
+    debugTokenUsage("hook-createToken", {
+      tokenId: documentId(document),
+      tokenName: document?.name ?? ""
+    });
     this.enqueue(document, ["creation"], [] , { created: true });
   }
 
   handleDeletion(document) {
+    debugTokenUsage("hook-deleteToken", {
+      tokenId: documentId(document),
+      tokenName: document?.name ?? ""
+    });
     this.enqueue(document, ["deletion"], [], { deleted: true });
   }
 
