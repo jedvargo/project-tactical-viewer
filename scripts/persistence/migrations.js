@@ -1,4 +1,5 @@
 import {
+  canonicalViewId,
   CURRENT_SCHEMA_VERSION,
   VIEW_DEFINITIONS
 } from "../constants.js";
@@ -10,6 +11,8 @@ export const CURRENT_LAYOUT_SCHEMA_VERSION = CURRENT_SCHEMA_VERSION;
 export const MAX_SCENE_LAYOUTS = 32;
 
 export const DEFAULT_GRID_OPACITY = 1;
+export const DEFAULT_GRID_STYLE = "solid";
+export const GRID_LINE_STYLES = Object.freeze(["solid", "dashes", "dots"]);
 export const DEFAULT_BACKGROUND = Object.freeze({ color: "#111820", image: "" });
 
 export const DEFAULT_OVERLAYS = Object.freeze({
@@ -20,13 +23,14 @@ export const DEFAULT_OVERLAYS = Object.freeze({
   pitch: true,
   coordinates: true,
   debugAxes: false,
-  gridOpacity: DEFAULT_GRID_OPACITY
+  gridOpacity: DEFAULT_GRID_OPACITY,
+  gridStyle: DEFAULT_GRID_STYLE
 });
 
 export const DEFAULT_DISPLAY_MODE = "window";
 export const DISPLAY_MODES = Object.freeze(["window", "scene", "replace"]);
 
-const DEFAULT_PANEL_VIEWS = Object.freeze(["top", "north", "iso-ne", "west"]);
+const DEFAULT_PANEL_VIEWS = Object.freeze(["top", "front", "isometric", "left"]);
 const VIEW_IDS = new Set(VIEW_DEFINITIONS.map(({ id }) => id));
 const TRANSIENT_KEYS = new Set(["pan", "panZoom", "center", "focus", "zoom", "scale"]);
 const LEGACY_ROOT_KEYS = new Set([
@@ -96,6 +100,10 @@ export function normalizeGridOpacity(value, fallback = DEFAULT_GRID_OPACITY) {
   return Number.isFinite(number) ? Math.min(1, Math.max(0, number)) : fallback;
 }
 
+export function normalizeGridStyle(value, fallback = DEFAULT_GRID_STYLE) {
+  return GRID_LINE_STYLES.includes(value) ? value : fallback;
+}
+
 export function normalizeGridDimensions(value) {
   if (!isRecord(value)) return null;
   const columns = Number(value.x ?? value.columns);
@@ -126,7 +134,8 @@ export function normalizeDisplayMode(value, fallback = DEFAULT_DISPLAY_MODE) {
 }
 
 function normalizedView(value, fallback) {
-  return typeof value === "string" && VIEW_IDS.has(value) ? value : fallback;
+  const canonical = canonicalViewId(value);
+  return typeof canonical === "string" && VIEW_IDS.has(canonical) ? canonical : fallback;
 }
 
 function normalizedLastUsed(value) {
@@ -148,7 +157,8 @@ function normalizedOverlays(value) {
     ...Object.fromEntries(Object.entries(DEFAULT_OVERLAYS)
       .filter(([key]) => typeof source[key] === "boolean")
       .map(([key]) => [key, source[key]])),
-    gridOpacity: normalizeGridOpacity(source.gridOpacity)
+    gridOpacity: normalizeGridOpacity(source.gridOpacity),
+    gridStyle: normalizeGridStyle(source.gridStyle)
   };
 }
 

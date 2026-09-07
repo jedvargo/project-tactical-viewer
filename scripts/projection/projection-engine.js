@@ -14,9 +14,54 @@ const ORTHOGRAPHIC_VIEWS = Object.freeze({
       hidden: "Z Up"
     })
   }),
-  north: Object.freeze({
-    id: "north",
-    name: "North",
+  bottom: Object.freeze({
+    id: "bottom",
+    name: "Bottom",
+    visibleAxes: Object.freeze(["x", "y"]),
+    hiddenAxis: "z",
+    horizontal: Object.freeze({ axis: "x", sign: -1 }),
+    vertical: Object.freeze({ axis: "y", sign: 1 }),
+    screenUp: Object.freeze({ axis: "y", sign: 1 }),
+    mirroredAxis: "both",
+    labels: Object.freeze({
+      horizontal: "-X West",
+      vertical: "+Y South",
+      hidden: "Z Up"
+    })
+  }),
+  left: Object.freeze({
+    id: "left",
+    name: "Left",
+    visibleAxes: Object.freeze(["y", "z"]),
+    hiddenAxis: "x",
+    horizontal: Object.freeze({ axis: "y", sign: -1 }),
+    vertical: Object.freeze({ axis: "z", sign: -1 }),
+    screenUp: Object.freeze({ axis: "z", sign: -1 }),
+    mirroredAxis: "horizontal",
+    labels: Object.freeze({
+      horizontal: "-Y North",
+      vertical: "+Z Up",
+      hidden: "+X East"
+    })
+  }),
+  right: Object.freeze({
+    id: "right",
+    name: "Right",
+    visibleAxes: Object.freeze(["y", "z"]),
+    hiddenAxis: "x",
+    horizontal: Object.freeze({ axis: "y", sign: 1 }),
+    vertical: Object.freeze({ axis: "z", sign: -1 }),
+    screenUp: Object.freeze({ axis: "z", sign: -1 }),
+    mirroredAxis: null,
+    labels: Object.freeze({
+      horizontal: "+Y South",
+      vertical: "+Z Up",
+      hidden: "+X East"
+    })
+  }),
+  front: Object.freeze({
+    id: "front",
+    name: "Front",
     visibleAxes: Object.freeze(["x", "z"]),
     hiddenAxis: "y",
     horizontal: Object.freeze({ axis: "x", sign: 1 }),
@@ -29,14 +74,14 @@ const ORTHOGRAPHIC_VIEWS = Object.freeze({
       hidden: "+Y South"
     })
   }),
-  south: Object.freeze({
-    id: "south",
-    name: "South",
+  back: Object.freeze({
+    id: "back",
+    name: "Back",
     visibleAxes: Object.freeze(["x", "z"]),
     hiddenAxis: "y",
     horizontal: Object.freeze({ axis: "x", sign: -1 }),
-    vertical: Object.freeze({ axis: "z", sign: 1 }),
-    screenUp: Object.freeze({ axis: "z", sign: 1 }),
+    vertical: Object.freeze({ axis: "z", sign: -1 }),
+    screenUp: Object.freeze({ axis: "z", sign: -1 }),
     mirroredAxis: "horizontal",
     labels: Object.freeze({
       horizontal: "-X West",
@@ -44,36 +89,6 @@ const ORTHOGRAPHIC_VIEWS = Object.freeze({
       hidden: "+Y South"
     })
   }),
-  east: Object.freeze({
-    id: "east",
-    name: "East",
-    visibleAxes: Object.freeze(["y", "z"]),
-    hiddenAxis: "x",
-    horizontal: Object.freeze({ axis: "y", sign: 1 }),
-    vertical: Object.freeze({ axis: "z", sign: 1 }),
-    screenUp: Object.freeze({ axis: "z", sign: 1 }),
-    mirroredAxis: null,
-    labels: Object.freeze({
-      horizontal: "+Y South",
-      vertical: "+Z Up",
-      hidden: "+X East"
-    })
-  }),
-  west: Object.freeze({
-    id: "west",
-    name: "West",
-    visibleAxes: Object.freeze(["y", "z"]),
-    hiddenAxis: "x",
-    horizontal: Object.freeze({ axis: "y", sign: -1 }),
-    vertical: Object.freeze({ axis: "z", sign: 1 }),
-    screenUp: Object.freeze({ axis: "z", sign: 1 }),
-    mirroredAxis: "horizontal",
-    labels: Object.freeze({
-      horizontal: "-Y North",
-      vertical: "+Z Up",
-      hidden: "+X East"
-    })
-  })
 });
 
 const ROOT_TWO = Math.sqrt(2);
@@ -100,7 +115,7 @@ const ISOMETRIC_VIEWS = Object.freeze({
     hiddenAxis: null,
     basis: Object.freeze({
       right: basisVector(1 / ROOT_TWO, 1 / ROOT_TWO, 0),
-      up: basisVector(-1 / ROOT_SIX, 1 / ROOT_SIX, 2 / ROOT_SIX),
+      up: basisVector(1 / ROOT_SIX, -1 / ROOT_SIX, -2 / ROOT_SIX),
       depth: basisVector(1 / ROOT_THREE, -1 / ROOT_THREE, 1 / ROOT_THREE)
     }),
     cameraPosition: basisVector(1, -1, 1),
@@ -118,7 +133,7 @@ const ISOMETRIC_VIEWS = Object.freeze({
     hiddenAxis: null,
     basis: Object.freeze({
       right: basisVector(-1 / ROOT_TWO, 1 / ROOT_TWO, 0),
-      up: basisVector(-1 / ROOT_SIX, -1 / ROOT_SIX, 2 / ROOT_SIX),
+      up: basisVector(1 / ROOT_SIX, 1 / ROOT_SIX, -2 / ROOT_SIX),
       depth: basisVector(1 / ROOT_THREE, 1 / ROOT_THREE, 1 / ROOT_THREE)
     }),
     cameraPosition: basisVector(1, 1, 1),
@@ -136,7 +151,7 @@ const ISOMETRIC_VIEWS = Object.freeze({
     hiddenAxis: null,
     basis: Object.freeze({
       right: basisVector(-1 / ROOT_TWO, -1 / ROOT_TWO, 0),
-      up: basisVector(1 / ROOT_SIX, -1 / ROOT_SIX, 2 / ROOT_SIX),
+      up: basisVector(-1 / ROOT_SIX, 1 / ROOT_SIX, -2 / ROOT_SIX),
       depth: basisVector(-1 / ROOT_THREE, 1 / ROOT_THREE, 1 / ROOT_THREE)
     }),
     cameraPosition: basisVector(-1, 1, 1),
@@ -154,7 +169,7 @@ const ISOMETRIC_VIEWS = Object.freeze({
     hiddenAxis: null,
     basis: Object.freeze({
       right: basisVector(1 / ROOT_TWO, -1 / ROOT_TWO, 0),
-      up: basisVector(1 / ROOT_SIX, 1 / ROOT_SIX, 2 / ROOT_SIX),
+      up: basisVector(-1 / ROOT_SIX, -1 / ROOT_SIX, -2 / ROOT_SIX),
       depth: basisVector(-1 / ROOT_THREE, -1 / ROOT_THREE, 1 / ROOT_THREE)
     }),
     cameraPosition: basisVector(-1, -1, 1),
@@ -166,11 +181,32 @@ const ISOMETRIC_VIEWS = Object.freeze({
   })
 });
 
+const CANONICAL_ISOMETRIC_VIEW = Object.freeze({
+  ...ISOMETRIC_VIEWS["iso-ne"],
+  id: "isometric",
+  name: "Isometric"
+});
+
+// Keep old IDs readable for saved render models and third-party callers. They
+// are intentionally omitted from listViews(), which exposes only the current
+// seven-view vocabulary.
+const LEGACY_ORTHOGRAPHIC_VIEWS = Object.freeze({
+  north: Object.freeze({ ...ORTHOGRAPHIC_VIEWS.front, id: "north", name: "North" }),
+  south: Object.freeze({ ...ORTHOGRAPHIC_VIEWS.back, id: "south", name: "South" }),
+  east: Object.freeze({ ...ORTHOGRAPHIC_VIEWS.right, id: "east", name: "East" }),
+  west: Object.freeze({ ...ORTHOGRAPHIC_VIEWS.left, id: "west", name: "West" })
+});
+
 const PROJECTION_VIEWS = Object.freeze({
   ...ORTHOGRAPHIC_VIEWS,
+  isometric: CANONICAL_ISOMETRIC_VIEW,
+  ...LEGACY_ORTHOGRAPHIC_VIEWS,
   ...ISOMETRIC_VIEWS
 });
-const PROJECTION_VIEW_IDS = Object.freeze(Object.keys(PROJECTION_VIEWS));
+const PROJECTION_VIEW_IDS = Object.freeze([
+  ...Object.keys(ORTHOGRAPHIC_VIEWS),
+  "isometric"
+]);
 
 function finiteNumber(value, name) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -406,8 +442,13 @@ export class ProjectionEngine {
 }
 
 export const ORTHOGRAPHIC_VIEW_DEFINITIONS = ORTHOGRAPHIC_VIEWS;
-export const ISOMETRIC_VIEW_DEFINITIONS = ISOMETRIC_VIEWS;
-export const PROJECTION_VIEW_DEFINITIONS = PROJECTION_VIEWS;
+export const ISOMETRIC_VIEW_DEFINITIONS = Object.freeze({
+  isometric: CANONICAL_ISOMETRIC_VIEW
+});
+export const PROJECTION_VIEW_DEFINITIONS = Object.freeze({
+  ...ORTHOGRAPHIC_VIEWS,
+  isometric: CANONICAL_ISOMETRIC_VIEW
+});
 
 export function createProjectionEngine() {
   return new ProjectionEngine();

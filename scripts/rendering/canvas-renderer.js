@@ -1,4 +1,4 @@
-import { orientationVector } from "../model/orientation-math.js";
+import { orientationVector, snapHeading } from "../model/orientation-math.js";
 import { CoordinateAdapter } from "../model/coordinate-adapter.js";
 import { ProjectionEngine } from "../projection/projection-engine.js";
 import {
@@ -10,10 +10,17 @@ import { localize, localizeFormat } from "../i18n.js";
 const DEFAULT_BACKGROUND = "#111820";
 const DEFAULT_GRID = "rgba(151, 183, 204, 0.34)";
 const DEFAULT_GRID_MAJOR = "rgba(206, 229, 240, 0.55)";
+const GRID_LINE_STYLES = new Set(["solid", "dashes", "dots"]);
 const DEFAULT_TOKEN = "#e6b35a";
 const DEFAULT_TOKEN_STROKE = "#fff4cf";
+const DEFAULT_ISOMETRIC_TOP = "#e6b35a";
+const DEFAULT_ISOMETRIC_X_FACE = "#c78f3f";
+const DEFAULT_ISOMETRIC_Y_FACE = "#9d6c35";
+const DEFAULT_ISOMETRIC_EDGE = "#fff4cf";
 const DEFAULT_ORIENTATION = "#ff765e";
 const DEFAULT_TEXT = "#f3f5f7";
+export const DEFAULT_GRID_MARGIN = 24;
+const ISOMETRIC_TOKEN_INSET = 0.08;
 const ZERO_Z_RANGE = Object.freeze({ min: 0, max: 0 });
 
 function finiteOr(value, fallback) {
@@ -35,23 +42,25 @@ function dimensionsOf(viewport) {
 function tokenDimensions(state) {
   return {
     width: Math.max(1, positiveOr(state?.width, 1)),
-    height: Math.max(1, positiveOr(state?.height, 1))
+    height: Math.max(1, positiveOr(state?.height, 1)),
+    depth: Math.max(1, positiveOr(state?.depth, 1))
   };
 }
 
-function projectedFootprint({ state, projectionEngine, camera, definition }) {
-  const { width, height } = tokenDimensions(state);
-  // Preserve the established compact marker for 1x1 tokens. Larger tokens
-  // use their real cell footprint so rectangular ships remain recognizable.
+function projectedFootprint({ state, projectionEngine, camera, definition, worldPoint }) {
+  const { width, height, depth } = tokenDimensions(state);
   const baseSize = Math.max(8, camera.scale * 0.24);
-  if (width === 1 && height === 1) return { width: baseSize, height: baseSize };
 
   if (definition.basis) {
     const corners = [
-      { x: state.tacticalX - width / 2, y: state.tacticalY - height / 2, z: state.tacticalZ },
-      { x: state.tacticalX + width / 2, y: state.tacticalY - height / 2, z: state.tacticalZ },
-      { x: state.tacticalX - width / 2, y: state.tacticalY + height / 2, z: state.tacticalZ },
-      { x: state.tacticalX + width / 2, y: state.tacticalY + height / 2, z: state.tacticalZ }
+      { x: worldPoint.x - width / 2, y: worldPoint.y - height / 2, z: worldPoint.z - depth / 2 },
+      { x: worldPoint.x + width / 2, y: worldPoint.y - height / 2, z: worldPoint.z - depth / 2 },
+      { x: worldPoint.x - width / 2, y: worldPoint.y + height / 2, z: worldPoint.z - depth / 2 },
+      { x: worldPoint.x + width / 2, y: worldPoint.y + height / 2, z: worldPoint.z - depth / 2 },
+      { x: worldPoint.x - width / 2, y: worldPoint.y - height / 2, z: worldPoint.z + depth / 2 },
+      { x: worldPoint.x + width / 2, y: worldPoint.y - height / 2, z: worldPoint.z + depth / 2 },
+      { x: worldPoint.x - width / 2, y: worldPoint.y + height / 2, z: worldPoint.z + depth / 2 },
+      { x: worldPoint.x + width / 2, y: worldPoint.y + height / 2, z: worldPoint.z + depth / 2 }
     ].map((corner) => projectionEngine.projectPoint(corner, camera));
     return {
       width: Math.max(baseSize, Math.max(...corners.map(({ x }) => x)) - Math.min(...corners.map(({ x }) => x))),
@@ -70,8 +79,171 @@ function projectedFootprint({ state, projectionEngine, camera, definition }) {
   const horizontalCells = definition.horizontal.axis === "x" ? width : height;
   return {
     width: Math.max(baseSize, horizontalCells * camera.scale),
-    height: baseSize
+    height: Math.max(baseSize, depth * camera.scale)
   };
+}
+
+function isometricView(view) {
+  return view === "isometric" || (typeof view === "string" && view.startsWith("iso-"));
+}
+
+/**
+ * Return the rotation of a forward-facing image in the visible Y face.
+ * The image's unrotated nose points toward +Z. Front-view projection hides Y,
+ * so heading contributes its X component and pitch contributes its Z
+ * component. The projected orientation vector remains the complete 3D
+ * authority and is drawn separately by the renderer.
+ */
+function isometricImageRotation(heading, pitch, forwardOffset = 0) {
+  const vector = orientationVector(heading, pitch);
+  const visibleLength = Math.hypot(vector.dx, vector.dz);
+  if (visibleLength <= 1e-9) return -forwardOffset * Math.PI / 180;
+  return Math.atan2(-vector.dz, vector.dx) + Math.PI / 2
+    - forwardOffset * Math.PI / 180;
+}
+
+function isometricTokenGeometry(token, projectionEngine, camera) {
+  const width = Math.max(0.1, positiveOr(token?.width, 1) - ISOMETRIC_TOKEN_INSET);
+  const height = Math.max(0.1, positiveOr(token?.height, 1) - ISOMETRIC_TOKEN_INSET);
+  const depth = Math.max(0.1, positiveOr(token?.depth, 1) - ISOMETRIC_TOKEN_INSET);
+  const center = token?.worldPoint ?? { x: 0, y: 0, z: 0 };
+  const corner = (xSign, ySign, zSign) => projectionEngine.projectPoint({
+    x: center.x + xSign * width / 2,
+    y: center.y + ySign * height / 2,
+    z: center.z + zSign * depth / 2
+  }, camera);
+  const vertices = {
+    xMinusYMinusZMinus: corner(-1, -1, -1),
+    xPlusYMinusZMinus: corner(1, -1, -1),
+    xMinusYPlusZMinus: corner(-1, 1, -1),
+    xPlusYPlusZMinus: corner(1, 1, -1),
+    xMinusYMinusZPlus: corner(-1, -1, 1),
+    xPlusYMinusZPlus: corner(1, -1, 1),
+    xMinusYPlusZPlus: corner(-1, 1, 1),
+    xPlusYPlusZPlus: corner(1, 1, 1)
+  };
+  const faces = {
+    top: [
+      vertices.xMinusYMinusZPlus,
+      vertices.xPlusYMinusZPlus,
+      vertices.xPlusYPlusZPlus,
+      vertices.xMinusYPlusZPlus
+    ],
+    xPositive: [
+      vertices.xPlusYMinusZMinus,
+      vertices.xPlusYPlusZMinus,
+      vertices.xPlusYPlusZPlus,
+      vertices.xPlusYMinusZPlus
+    ],
+    xNegative: [
+      vertices.xMinusYPlusZMinus,
+      vertices.xMinusYMinusZMinus,
+      vertices.xMinusYMinusZPlus,
+      vertices.xMinusYPlusZPlus
+    ],
+    yPositive: [
+      vertices.xPlusYPlusZMinus,
+      vertices.xMinusYPlusZMinus,
+      vertices.xMinusYPlusZPlus,
+      vertices.xPlusYPlusZPlus
+    ],
+    yNegative: [
+      vertices.xMinusYMinusZMinus,
+      vertices.xPlusYMinusZMinus,
+      vertices.xPlusYMinusZPlus,
+      vertices.xMinusYMinusZPlus
+    ]
+  };
+  const cameraPosition = projectionEngine.describe(camera.view).cameraPosition ?? { x: 1, y: -1 };
+  const xFace = cameraPosition.x >= 0 ? faces.xPositive : faces.xNegative;
+  const yFace = cameraPosition.y >= 0 ? faces.yPositive : faces.yNegative;
+  // The canonical isometric direction is top / front-left / left-right. Keep
+  // the artwork on the visible front face (the camera-facing Y plane), which
+  // is screen-left in iso-ne instead of moving it to the side on screen-right.
+  // Reorder the vertices for image mapping so source image top is cube top and
+  // source image left/right always follows tactical -/+X.
+  const imageFace = cameraPosition.y >= 0
+    ? [
+      vertices.xMinusYPlusZPlus,
+      vertices.xPlusYPlusZPlus,
+      vertices.xPlusYPlusZMinus,
+      vertices.xMinusYPlusZMinus
+    ]
+    : [
+      vertices.xMinusYMinusZPlus,
+      vertices.xPlusYMinusZPlus,
+      vertices.xPlusYMinusZMinus,
+      vertices.xMinusYMinusZMinus
+    ];
+  return {
+    faces: [yFace, xFace, faces.top],
+    imageFace,
+    edges: [
+      [vertices.xMinusYMinusZMinus, vertices.xPlusYMinusZMinus],
+      [vertices.xPlusYMinusZMinus, vertices.xPlusYPlusZMinus],
+      [vertices.xPlusYPlusZMinus, vertices.xMinusYPlusZMinus],
+      [vertices.xMinusYPlusZMinus, vertices.xMinusYMinusZMinus],
+      [vertices.xMinusYMinusZPlus, vertices.xPlusYMinusZPlus],
+      [vertices.xPlusYMinusZPlus, vertices.xPlusYPlusZPlus],
+      [vertices.xPlusYPlusZPlus, vertices.xMinusYPlusZPlus],
+      [vertices.xMinusYPlusZPlus, vertices.xMinusYMinusZPlus],
+      [vertices.xMinusYMinusZMinus, vertices.xMinusYMinusZPlus],
+      [vertices.xPlusYMinusZMinus, vertices.xPlusYMinusZPlus],
+      [vertices.xPlusYPlusZMinus, vertices.xPlusYPlusZPlus],
+      [vertices.xMinusYPlusZMinus, vertices.xMinusYPlusZPlus]
+    ]
+  };
+}
+
+function tracePolygon(context, points) {
+  if (!Array.isArray(points) || points.length === 0) return false;
+  context.beginPath?.();
+  context.moveTo?.(points[0].x, points[0].y);
+  for (const point of points.slice(1)) context.lineTo?.(point.x, point.y);
+  context.closePath?.();
+  return true;
+}
+
+function drawImageOnIsometricFace(context, image, face, mirrored = false, rotation = 0) {
+  if (typeof context.drawImage !== "function" || !Array.isArray(face) || face.length < 4) return false;
+  const [originalP0, originalP1, originalP2, originalP3] = face;
+  const p0 = mirrored ? originalP1 : originalP0;
+  const p1 = mirrored ? originalP0 : originalP1;
+  const p3 = mirrored ? originalP2 : originalP3;
+  const minX = Math.min(...face.map(({ x }) => x));
+  const maxX = Math.max(...face.map(({ x }) => x));
+  const minY = Math.min(...face.map(({ y }) => y));
+  const maxY = Math.max(...face.map(({ y }) => y));
+  const canMapFace = typeof context.save === "function"
+    && typeof context.restore === "function"
+    && typeof context.clip === "function"
+    && typeof context.transform === "function";
+  try {
+    context.save?.();
+    tracePolygon(context, face);
+    context.clip?.();
+    if (canMapFace) {
+      context.transform(
+        p1.x - p0.x,
+        p1.y - p0.y,
+        p3.x - p0.x,
+        p3.y - p0.y,
+        p0.x,
+        p0.y
+      );
+      context.translate?.(0.5, 0.5);
+      context.rotate?.(finiteOr(rotation, 0));
+      context.translate?.(-0.5, -0.5);
+      context.drawImage(image, 0, 0, 1, 1);
+    } else {
+      context.drawImage(image, minX, minY, Math.max(1, maxX - minX), Math.max(1, maxY - minY));
+    }
+    context.restore?.();
+    return true;
+  } catch {
+    try { context.restore?.(); } catch { /* best effort after a canvas error */ }
+    return false;
+  }
 }
 
 function normalizedGridDimensions(value) {
@@ -82,6 +254,10 @@ function normalizedGridDimensions(value) {
     || !Number.isInteger(rows) || rows < 1 || rows > 200
     || !Number.isInteger(depth) || depth < 1 || depth > 200) return null;
   return { columns, rows, z: depth };
+}
+
+function normalizedGridStyle(value) {
+  return GRID_LINE_STYLES.has(value) ? value : "solid";
 }
 
 function gridWithDimensions(grid, dimensions) {
@@ -112,6 +288,11 @@ function formatSigned(value) {
   return value > 0 ? `+${value}` : String(value);
 }
 
+function formatHeading(value) {
+  const normalized = snapHeading(finiteOr(value, 0));
+  return String(normalized).padStart(3, "0");
+}
+
 function screenCenterFor(viewport, pan) {
   const { width, height } = dimensionsOf(viewport);
   return {
@@ -120,14 +301,23 @@ function screenCenterFor(viewport, pan) {
   };
 }
 
-function cameraForTop({ grid, viewport, zoom, focus, pan }) {
+function fitDimension(value, margin) {
+  const inset = Math.max(0, finiteOr(margin, DEFAULT_GRID_MARGIN));
+  return Math.max(1, value - inset * 2);
+}
+
+function fitScaleFor(viewport, horizontalExtent, verticalExtent, margin) {
   const { width, height } = dimensionsOf(viewport);
-  const fitScale = Math.min(
-    width / Math.max(1, grid.columns),
-    height / Math.max(1, grid.rows)
+  return Math.min(
+    fitDimension(width, margin) / Math.max(1, horizontalExtent),
+    fitDimension(height, margin) / Math.max(1, verticalExtent)
   );
+}
+
+function cameraForTop({ view = "top", grid, viewport, zoom, focus, pan, fitMargin = DEFAULT_GRID_MARGIN }) {
+  const fitScale = fitScaleFor(viewport, grid.columns, grid.rows, fitMargin);
   return {
-    view: "top",
+    view,
     focus: focus ?? { x: grid.columns / 2, y: grid.rows / 2, z: 0 },
     // `zoom` is the logical tactical scale: CSS pixels per tactical cell.
     // When omitted, retain the initial fit-to-panel behavior for callers that
@@ -141,25 +331,25 @@ function zBounds(tacticalStates = [], configuredDepth) {
   const levels = tacticalStates
     .map((state) => state?.tacticalZ)
     .filter((value) => typeof value === "number" && Number.isFinite(value));
-  const minimum = Math.min(0, ...(levels.length ? levels : [0]));
   const configuredMaximum = Number.isInteger(configuredDepth) && configuredDepth > 0
     ? configuredDepth
     : 0;
-  const maximum = Math.max(configuredMaximum, ...(levels.length ? levels : [0]));
   if (configuredMaximum > 0) {
     return {
-      min: Math.floor(minimum),
-      max: Math.ceil(maximum)
+      min: 0,
+      max: configuredMaximum
     };
   }
+  const minimum = Math.min(0, ...(levels.length ? levels : [0]));
+  const maximum = Math.max(0, ...(levels.length ? levels : [0]));
   return {
     min: Math.floor(minimum) - 2,
     max: Math.ceil(maximum) + 2
   };
 }
 
-function cameraForIsometric({ definition, grid, viewport, zoom, focus, pan, tacticalStates }) {
-  const { width, height } = dimensionsOf(viewport);
+function cameraForIsometric({ definition, grid, viewport, zoom, focus, pan, tacticalStates,
+  fitMargin = DEFAULT_GRID_MARGIN }) {
   const bounds = zBounds(tacticalStates, grid.depth);
   const defaultFocus = {
     x: grid.columns / 2,
@@ -198,7 +388,7 @@ function cameraForIsometric({ definition, grid, viewport, zoom, focus, pan, tact
         + point.y * definition.basis.up.y
         + point.z * definition.basis.up.z))
   );
-  const fitScale = Math.min(width / horizontalExtent, height / verticalExtent);
+  const fitScale = fitScaleFor(viewport, horizontalExtent, verticalExtent, fitMargin);
   return {
     view: definition.id,
     focus: focus ?? defaultFocus,
@@ -207,17 +397,29 @@ function cameraForIsometric({ definition, grid, viewport, zoom, focus, pan, tact
   };
 }
 
-function cameraForOrthographic({ definition, grid, viewport, zoom, focus, pan, tacticalStates }) {
-  const { width, height } = dimensionsOf(viewport);
+function cameraForOrthographic({ definition, grid, viewport, zoom, focus, pan, tacticalStates,
+  fitMargin = DEFAULT_GRID_MARGIN }) {
   const isTop = definition.visibleAxes.includes("y") && definition.hiddenAxis === "z";
   const horizontalAxis = definition.horizontal.axis;
   const horizontalExtent = horizontalAxis === "x" ? grid.columns : grid.rows;
-  if (isTop) return cameraForTop({ grid, viewport, zoom, focus, pan });
+  if (isTop) {
+    return cameraForTop({
+      view: definition.id,
+      grid,
+      viewport,
+      zoom,
+      focus,
+      pan,
+      fitMargin
+    });
+  }
 
   const bounds = zBounds(tacticalStates, grid.depth);
-  const fitScale = Math.min(
-    width / Math.max(1, horizontalExtent),
-    height / Math.max(1, bounds.max - bounds.min)
+  const fitScale = fitScaleFor(
+    viewport,
+    horizontalExtent,
+    bounds.max - bounds.min,
+    fitMargin
   );
   const defaultFocus = {
     x: horizontalAxis === "x" ? grid.columns / 2 : 0,
@@ -273,7 +475,10 @@ function projectedVerticalGrid({ grid, camera, projectionEngine, zRange, definit
       return {
         start: projectionEngine.projectPoint(pointAt(0, z), camera),
         end: projectionEngine.projectPoint(pointAt(extent, z), camera),
-        major: z === 0
+        // The zero-elevation plane is a normal grid line. Marking it as a
+        // major line creates an H-shaped heavy outline when negative and
+        // positive Z levels are both visible.
+        major: z === zRange.min || z === zRange.max
       };
     }
   );
@@ -326,7 +531,7 @@ function projectedIsometricGrid({ grid, camera, projectionEngine, zRange }) {
   });
 }
 
-function staticKeyFor({ sceneId, view, camera, grid, width, height, dpr, gridOverlay, gridOpacity, background }) {
+function staticKeyFor({ sceneId, view, camera, grid, width, height, dpr, gridOverlay, gridOpacity, gridStyle, debugAxes, background }) {
   return [
     sceneId,
     view,
@@ -345,6 +550,8 @@ function staticKeyFor({ sceneId, view, camera, grid, width, height, dpr, gridOve
     dpr,
     gridOverlay,
     gridOpacity,
+    gridStyle,
+    debugAxes,
     background?.color,
     background?.image
   ].join(":");
@@ -361,6 +568,8 @@ function staticKey(model, width, height, dpr) {
     dpr,
     gridOverlay: model.overlays.grid,
     gridOpacity: model.overlays.gridOpacity,
+    gridStyle: model.overlays.gridStyle,
+    debugAxes: model.overlays.debugAxes,
     background: model.background
   });
 }
@@ -382,13 +591,23 @@ function sceneGridKey(scene) {
 
 function visibleToken(state, projectionEngine, camera, viewport, definition, selectedTokenId = null) {
   if (!state || state.visibleToCurrentUser !== true || state.participating !== true) return null;
+  const depth = tokenDimensions(state).depth;
+  // Foundry elevation is the bottom of the token's vertical cell footprint.
+  // Keep the canonical tactical Z unchanged for state/readouts, but project
+  // the marker at the center of that cell so it never sits on a Z grid line.
   const worldPoint = {
     x: state.tacticalX,
     y: state.tacticalY,
-    z: state.tacticalZ
+    z: state.tacticalZ + depth / 2
   };
   const point = projectionEngine.projectPoint(worldPoint, camera);
-  const footprint = projectedFootprint({ state, projectionEngine, camera, definition });
+  const footprint = projectedFootprint({
+    state,
+    projectionEngine,
+    camera,
+    definition,
+    worldPoint
+  });
   const markerRadius = Math.max(4, footprint.width / 2, footprint.height / 2);
   const { width, height } = dimensionsOf(viewport);
   if (point.x + markerRadius < 0 || point.x - markerRadius > width
@@ -398,17 +617,21 @@ function visibleToken(state, projectionEngine, camera, viewport, definition, sel
     orientationVector(state.heading, state.pitch),
     { ...camera, scale: camera.scale * 0.5 }
   );
-  const artDirection = projectionEngine.projectOrientationVector(
-    orientationVector(state.heading, 0),
-    { ...camera, scale: 1 }
-  );
-  const artDirectionLength = Math.hypot(artDirection.x, artDirection.y);
   const forwardOffset = state.textureSource
     ? 0
     : finiteOr(state.art?.forwardOffset, 0) * Math.PI / 180;
-  const artRotation = artDirectionLength > 1e-9
-    ? Math.atan2(artDirection.y, artDirection.x) + Math.PI / 2 - forwardOffset
-    : -forwardOffset;
+  const artRotation = definition.basis
+    ? isometricImageRotation(state.heading, state.pitch, finiteOr(state.art?.forwardOffset, 0))
+    : (() => {
+      const artDirection = projectionEngine.projectOrientationVector(
+        orientationVector(state.heading, 0),
+        { ...camera, scale: 1 }
+      );
+      const artDirectionLength = Math.hypot(artDirection.x, artDirection.y);
+      return artDirectionLength > 1e-9
+        ? Math.atan2(artDirection.y, artDirection.x) + Math.PI / 2 - forwardOffset
+        : -forwardOffset;
+    })();
   return {
     tokenId: state.tokenId,
     visibleToCurrentUser: true,
@@ -427,6 +650,7 @@ function visibleToken(state, projectionEngine, camera, viewport, definition, sel
     lockRotation: state.lockRotation === true,
     preview: state.preview === true,
     offGrid: state.offGrid === true,
+    depth,
     // Native Token texture is authoritative. Legacy Tactical Viewer art flags
     // are deliberately not allowed to replace the document's real token.
     art: state.textureSource
@@ -437,13 +661,20 @@ function visibleToken(state, projectionEngine, camera, viewport, definition, sel
     depthKey: definition.basis ? projectionEngine.depthKey(worldPoint, camera) : null,
     hiddenAxis: definition.hiddenAxis,
     hiddenAxisLabel: definition.hiddenAxis ? definition.hiddenAxis.toUpperCase() : null,
-    hiddenAxisValue: definition.hiddenAxis ? worldPoint[definition.hiddenAxis] : null,
+    hiddenAxisValue: definition.hiddenAxis
+      ? definition.hiddenAxis === "z"
+        ? state.tacticalZ
+        : worldPoint[definition.hiddenAxis]
+      : null,
     point,
     orientation,
+    isometric: Boolean(definition.basis),
     markerRadius,
     footprintWidth: footprint.width,
     footprintHeight: footprint.height,
-    multiCell: tokenDimensions(state).width > 1 || tokenDimensions(state).height > 1,
+    multiCell: tokenDimensions(state).width > 1
+      || tokenDimensions(state).height > 1
+      || tokenDimensions(state).depth > 1,
     selected: selectedTokenId !== null && state.tokenId === selectedTokenId
   };
 }
@@ -568,11 +799,13 @@ function createOrthographicRenderModel({
   pan,
   overlays = {},
   selectedTokenId = null,
+  selectionBox = null,
   movementPreview = null,
   staticGridProvider,
   gridGeometry,
   gridDimensions,
-  background
+  background,
+  fitMargin = DEFAULT_GRID_MARGIN
 } = {}) {
   const definition = projectionEngine.describe(view);
   const tacticalGrid = gridWithDimensions(
@@ -590,7 +823,8 @@ function createOrthographicRenderModel({
       zoom,
       focus,
       pan,
-      tacticalStates
+      tacticalStates,
+      fitMargin
     })
     : cameraForOrthographic({
       definition,
@@ -599,7 +833,8 @@ function createOrthographicRenderModel({
       zoom,
       focus,
       pan,
-      tacticalStates
+      tacticalStates,
+      fitMargin
     });
   const grid = staticGridProvider?.({
     grid: tacticalGrid,
@@ -660,6 +895,7 @@ function createOrthographicRenderModel({
     tokens,
     stacks: withOverlapMetadata.stacks,
     overlaps: withOverlapMetadata.stacks,
+    selectionBox,
     movementPreview,
     selectedTokenId,
     background: Object.freeze({
@@ -672,6 +908,9 @@ function createOrthographicRenderModel({
       gridOpacity: Number.isFinite(overlays.gridOpacity)
         ? Math.min(1, Math.max(0, overlays.gridOpacity))
         : 1,
+      gridStyle: normalizedGridStyle(overlays.gridStyle),
+      coordinates: overlays.coordinates !== false,
+      debugAxes: overlays.debugAxes === true,
       names: overlays.names !== false,
       elevation: overlays.elevation !== false,
       heading: overlays.heading !== false,
@@ -682,6 +921,26 @@ function createOrthographicRenderModel({
 
 export function createTopRenderModel(options = {}) {
   return createOrthographicRenderModel({ ...options, view: "top" });
+}
+
+export function createBottomRenderModel(options = {}) {
+  return createOrthographicRenderModel({ ...options, view: "bottom" });
+}
+
+export function createLeftRenderModel(options = {}) {
+  return createOrthographicRenderModel({ ...options, view: "left" });
+}
+
+export function createRightRenderModel(options = {}) {
+  return createOrthographicRenderModel({ ...options, view: "right" });
+}
+
+export function createFrontRenderModel(options = {}) {
+  return createOrthographicRenderModel({ ...options, view: "front" });
+}
+
+export function createBackRenderModel(options = {}) {
+  return createOrthographicRenderModel({ ...options, view: "back" });
 }
 
 export function createNorthRenderModel(options = {}) {
@@ -701,8 +960,8 @@ export function createWestRenderModel(options = {}) {
 }
 
 export function createIsometricRenderModel(options = {}) {
-  const view = options.view ?? "iso-ne";
-  if (!view.startsWith("iso-")) {
+  const view = options.view ?? "isometric";
+  if (view !== "isometric" && !view.startsWith("iso-")) {
     throw new RangeError("An isometric view ID is required");
   }
   return createOrthographicRenderModel({ ...options, view });
@@ -725,20 +984,25 @@ export function createIsoNwRenderModel(options = {}) {
 }
 
 export const RENDERABLE_ORTHOGRAPHIC_VIEW_IDS = Object.freeze([
-  "top", "north", "south", "east", "west"
+  "top", "bottom", "left", "right", "front", "back"
 ]);
 
 export const RENDERABLE_VIEW_IDS = Object.freeze([
   ...RENDERABLE_ORTHOGRAPHIC_VIEW_IDS,
-  "iso-ne", "iso-se", "iso-sw", "iso-nw"
+  "isometric"
+]);
+
+const LEGACY_RENDERABLE_VIEW_IDS = new Set([
+  "north", "south", "east", "west", "iso-ne", "iso-se", "iso-sw", "iso-nw"
 ]);
 
 export function isRenderableOrthographicView(view) {
-  return RENDERABLE_ORTHOGRAPHIC_VIEW_IDS.includes(view);
+  return RENDERABLE_ORTHOGRAPHIC_VIEW_IDS.includes(view)
+    || ["north", "south", "east", "west"].includes(view);
 }
 
 export function isRenderableView(view) {
-  return RENDERABLE_VIEW_IDS.includes(view);
+  return RENDERABLE_VIEW_IDS.includes(view) || LEGACY_RENDERABLE_VIEW_IDS.has(view);
 }
 
 /** Interface boundary for replaceable tactical Canvas2D renderers. */
@@ -877,7 +1141,7 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
   }
 
   getCachedGrid({ sceneId, view, camera, grid, width, height, dpr, gridOverlay,
-    gridOpacity, background, projectionEngine, definition, zRange }) {
+    gridOpacity, gridStyle, debugAxes, background, projectionEngine, definition, zRange }) {
     const isZView = definition.visibleAxes.includes("z");
     const key = staticKeyFor({
       sceneId,
@@ -894,6 +1158,8 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       dpr,
       gridOverlay,
       gridOpacity,
+      gridStyle,
+      debugAxes,
       background
     });
     const existing = this.staticGridCache.get(key);
@@ -928,6 +1194,11 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       overlays: panel.overlays,
       background: input.background ?? input.state?.background,
       selectedTokenId: input?.selectedTokenId ?? input?.state?.selectedTokenId,
+      selectionBox: input?.selectionBox
+        ?? (input?.state?.selectionBox
+          && input.state.selectionBox.panelIndex === input?.panelIndex
+          ? input.state.selectionBox
+          : null),
       movementPreview: input?.state?.movementPreview
     };
     const viewport = input.viewport;
@@ -944,6 +1215,8 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
         dpr,
         gridOverlay: panel.overlays?.grid !== false,
         gridOpacity: panel.overlays?.gridOpacity,
+        gridStyle: panel.overlays?.gridStyle,
+        debugAxes: panel.overlays?.debugAxes === true,
         background: input.background ?? input.state?.background,
         projectionEngine,
         definition,
@@ -978,22 +1251,36 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       const gridOpacity = Number.isFinite(model.overlays.gridOpacity)
         ? Math.min(1, Math.max(0, model.overlays.gridOpacity))
         : 1;
+      const gridStyle = normalizedGridStyle(model.overlays.gridStyle);
+      const lineDash = gridStyle === "dashes"
+        ? [8, 6]
+        : gridStyle === "dots"
+          ? [1, 5]
+          : [];
       context.lineWidth = 1;
       const previousAlpha = context.globalAlpha;
-      context.globalAlpha = gridOpacity;
+      const previousLineCap = context.lineCap;
       const lines = model.grid.lines
         ?? [...model.grid.verticalLines, ...model.grid.horizontalLines];
       for (const line of lines) {
         context.beginPath?.();
+        context.globalAlpha = line.major ? 1 : gridOpacity;
+        // Major lines retain their stronger color/opacity, but they obey the
+        // selected line pattern too. This is especially important in the
+        // isometric volume, where every outer edge is marked major.
+        context.setLineDash?.(lineDash);
+        context.lineCap = gridStyle === "dots" ? "round" : "butt";
         context.strokeStyle = line.major
           ? this.colors.gridMajor ?? DEFAULT_GRID_MAJOR
           : this.colors.grid ?? DEFAULT_GRID;
         drawLine(context, line.start, line.end);
         context.stroke?.();
       }
+      context.setLineDash?.([]);
+      context.lineCap = previousLineCap;
       context.globalAlpha = previousAlpha;
     }
-    if (model.axisLabels) {
+    if (model.overlays.debugAxes && model.axisLabels) {
       context.fillStyle = this.colors.text ?? DEFAULT_TEXT;
       context.font = "12px sans-serif";
       context.fillText?.(model.axisLabels.horizontal, 8, Math.max(14, height - 8));
@@ -1054,25 +1341,37 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
 
     for (const token of model.tokens) {
       const { point, markerRadius, footprintWidth, footprintHeight, orientation } = token;
+      const tokenIsometric = token.isometric === true || isometricView(model.view);
       const art = this.assetManager?.peekArt?.(token.art, model.view);
-      const configuredForwardOffset = finiteOr(token.art?.forwardOffset, 0);
-      const resolvedForwardOffset = finiteOr(art?.forwardOffset, configuredForwardOffset);
-      const imageDrawn = art?.image
-        ? drawTacticalImage(
+      if (tokenIsometric) {
+        if (!art?.image) this.requestArt(token.art, model.view, input);
+        this.drawIsometricToken(
           context,
-          art.image,
-          point,
-          footprintWidth ?? markerRadius * 2,
-          footprintHeight ?? markerRadius * 2,
-          token.artRotation + (configuredForwardOffset - resolvedForwardOffset) * Math.PI / 180,
-          art.mirrored === true
-        )
-        : false;
-      if (!imageDrawn) {
-        this.requestArt(token.art, model.view, input);
-        // A native Token texture is loading; leave the cell clear rather than
-        // flashing the old yellow placeholder over the tactical map.
-        if (!token.art?.icon) {
+          token,
+          model.camera,
+          art?.image,
+          art?.mirrored === true,
+          art?.forwardOffset
+        );
+      } else {
+        const configuredForwardOffset = finiteOr(token.art?.forwardOffset, 0);
+        const resolvedForwardOffset = finiteOr(art?.forwardOffset, configuredForwardOffset);
+        const imageDrawn = art?.image
+          ? drawTacticalImage(
+            context,
+            art.image,
+            point,
+            footprintWidth ?? markerRadius * 2,
+            footprintHeight ?? markerRadius * 2,
+            token.artRotation + (configuredForwardOffset - resolvedForwardOffset) * Math.PI / 180,
+            art.mirrored === true
+          )
+          : false;
+        if (!imageDrawn) {
+          this.requestArt(token.art, model.view, input);
+          // Keep the token visible while native/custom artwork loads or if it
+          // fails. The generated marker is the stable, projection-independent
+          // fallback and preserves the token footprint.
           this.drawGeneratedMarker(
             context,
             point,
@@ -1085,11 +1384,15 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       }
 
       if (token.preview) {
-        context.beginPath?.();
         context.strokeStyle = this.colors.preview ?? "#8bd8ff";
         context.setLineDash?.([6, 4]);
-        context.arc?.(point.x, point.y, markerRadius + 6, 0, Math.PI * 2);
-        context.stroke?.();
+        if (tokenIsometric) {
+          this.drawIsometricTokenOutline(context, token, model.camera);
+        } else {
+          context.beginPath?.();
+          context.arc?.(point.x, point.y, markerRadius + 6, 0, Math.PI * 2);
+          context.stroke?.();
+        }
         context.setLineDash?.([]);
       }
 
@@ -1114,8 +1417,9 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
         }), labelX, labelY + 14);
       }
       if (model.overlays.heading) {
-        context.fillText?.(localizeFormat("renderer.heading", `H ${String(token.heading).padStart(3, "0")}°`, {
-          value: String(token.heading).padStart(3, "0")
+        const heading = formatHeading(token.heading);
+        context.fillText?.(localizeFormat("renderer.heading", `H ${heading}°`, {
+          value: heading
         }), labelX, labelY + 28);
       }
       if (model.overlays.pitch) {
@@ -1134,6 +1438,23 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
         stack.point.y - stack.markerRadius);
     }
 
+    if (model.selectionBox) {
+      const left = Math.min(model.selectionBox.start?.x, model.selectionBox.end?.x);
+      const top = Math.min(model.selectionBox.start?.y, model.selectionBox.end?.y);
+      const boxWidth = Math.abs(model.selectionBox.end?.x - model.selectionBox.start?.x);
+      const boxHeight = Math.abs(model.selectionBox.end?.y - model.selectionBox.start?.y);
+      if ([left, top, boxWidth, boxHeight].every(Number.isFinite)) {
+        context.save?.();
+        context.fillStyle = this.colors.selectionFill ?? "rgba(139, 216, 255, 0.14)";
+        context.strokeStyle = this.colors.selection ?? "#8bd8ff";
+        context.setLineDash?.([6, 4]);
+        context.fillRect?.(left, top, boxWidth, boxHeight);
+        context.strokeRect?.(left, top, boxWidth, boxHeight);
+        context.setLineDash?.([]);
+        context.restore?.();
+      }
+    }
+
     // Selection is deliberately a final overlay. Bodies remain in canonical
     // far-to-near order while a selected token remains understandable when a
     // nearer marker partly occludes it.
@@ -1142,12 +1463,65 @@ export class Canvas2DRendererV1 extends Canvas2DRenderer {
       context.beginPath?.();
       context.strokeStyle = this.colors.selection ?? "#ffffff";
       context.setLineDash?.([5, 3]);
-      context.arc?.(token.point.x, token.point.y, token.markerRadius + 4, 0, Math.PI * 2);
-      context.stroke?.();
+      if (token.isometric === true || isometricView(model.view)) {
+        this.drawIsometricTokenOutline(context, token, model.camera);
+      } else {
+        context.arc?.(token.point.x, token.point.y, token.markerRadius + 4, 0, Math.PI * 2);
+        context.stroke?.();
+      }
       context.setLineDash?.([]);
     }
 
     context.restore?.();
+    return true;
+  }
+
+  drawIsometricToken(
+    context,
+    token,
+    camera,
+    image = null,
+    mirrored = false,
+    resolvedForwardOffset = undefined
+  ) {
+    const geometry = isometricTokenGeometry(token, this.projectionEngine, camera);
+    const faceColors = [
+      this.colors.isometricYFace ?? DEFAULT_ISOMETRIC_Y_FACE,
+      this.colors.isometricXFace ?? DEFAULT_ISOMETRIC_X_FACE,
+      this.colors.isometricTop ?? DEFAULT_ISOMETRIC_TOP
+    ];
+    for (const [index, face] of geometry.faces.entries()) {
+      tracePolygon(context, face);
+      context.fillStyle = faceColors[index];
+      context.fill?.();
+    }
+    const configuredForwardOffset = finiteOr(token.art?.forwardOffset, 0);
+    const actualForwardOffset = finiteOr(resolvedForwardOffset, configuredForwardOffset);
+    if (image) drawImageOnIsometricFace(
+      context,
+      image,
+      geometry.imageFace,
+      mirrored,
+      token.artRotation + (configuredForwardOffset - actualForwardOffset) * Math.PI / 180
+    );
+
+    context.strokeStyle = this.colors.isometricEdge ?? DEFAULT_ISOMETRIC_EDGE;
+    context.lineWidth = 1;
+    for (const [start, end] of geometry.edges) {
+      context.beginPath?.();
+      drawLine(context, start, end);
+      context.stroke?.();
+    }
+    return true;
+  }
+
+  drawIsometricTokenOutline(context, token, camera) {
+    const geometry = isometricTokenGeometry(token, this.projectionEngine, camera);
+    for (const [start, end] of geometry.edges) {
+      context.beginPath?.();
+      drawLine(context, start, end);
+      context.stroke?.();
+    }
     return true;
   }
 

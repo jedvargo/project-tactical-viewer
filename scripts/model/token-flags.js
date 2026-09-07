@@ -1,5 +1,6 @@
 import {
   ALLOWED_PITCHES,
+  canonicalViewId,
   CURRENT_SCHEMA_VERSION,
   MODULE_ID,
   VIEW_DEFINITIONS
@@ -107,10 +108,17 @@ export function normalizeTokenArt(value) {
   const art = isRecord(value) ? value : {};
   const mirror = isRecord(art.mirror) ? art.mirror : {};
   const sourceViews = isRecord(art.views) ? art.views : {};
-  const views = Object.fromEntries(VIEW_DEFINITIONS.map(({ id }) => [
-    id,
-    typeof sourceViews[id] === "string" ? sourceViews[id] : ""
-  ]));
+  const views = Object.fromEntries(VIEW_DEFINITIONS.map(({ id }) => [id, ""]));
+  for (const [sourceView, source] of Object.entries(sourceViews)) {
+    const view = canonicalViewId(sourceView);
+    if (Object.hasOwn(views, view) && typeof source === "string" && !views[view]) {
+      views[view] = source;
+    }
+  }
+  // A current canonical value always wins over a migrated legacy value.
+  for (const { id } of VIEW_DEFINITIONS) {
+    if (typeof sourceViews[id] === "string") views[id] = sourceViews[id];
+  }
 
   return freezeObject({
     preset: typeof art.preset === "string" && art.preset ? art.preset : DEFAULT_ART.preset,

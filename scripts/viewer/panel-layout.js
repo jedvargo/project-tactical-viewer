@@ -4,13 +4,13 @@ import {
   normalizeDisplayMode,
   normalizedOverlays
 } from "../persistence/migrations.js";
-import { VIEW_DEFINITIONS } from "../constants.js";
+import { canonicalViewId, VIEW_DEFINITIONS } from "../constants.js";
 
 export const PANEL_COUNTS = Object.freeze([1, 2, 3, 4]);
 export const MIN_PANEL_WIDTH = 180;
 export const MIN_PANEL_HEIGHT = 120;
 export const PANEL_GRID_GAP = 4;
-export const DEFAULT_PANEL_VIEWS = Object.freeze(["top", "north", "iso-ne", "west"]);
+export const DEFAULT_PANEL_VIEWS = Object.freeze(["top", "front", "isometric", "left"]);
 export const DEFAULT_SPLITTER_PROPORTIONS = Object.freeze([0.5, 0.5]);
 
 const VIEW_IDS = new Set(VIEW_DEFINITIONS.map(({ id }) => id));
@@ -82,9 +82,9 @@ export function normalizePanelLayout(source = {}) {
     panelCount: normalizePanelCount(source?.panelCount),
     panels: DEFAULT_PANEL_VIEWS.map((fallback, index) => {
       const panel = panels[index];
-      const view = typeof panel?.view === "string" && VIEW_IDS.has(panel.view)
-        ? panel.view
-        : (typeof panel === "string" && VIEW_IDS.has(panel) ? panel : fallback);
+      const requested = typeof panel?.view === "string" ? panel.view : panel;
+      const canonical = canonicalViewId(requested);
+      const view = VIEW_IDS.has(canonical) ? canonical : fallback;
       return {
         view,
         overlays: panelOverlays(panel?.overlays)

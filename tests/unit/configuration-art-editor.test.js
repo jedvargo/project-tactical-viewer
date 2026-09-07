@@ -9,7 +9,7 @@ import {
 import { MODULE_ID, VIEW_DEFINITIONS } from "../../scripts/constants.js";
 
 describe("advanced tactical art editor", () => {
-  it("renders all nine fixed view slots and the non-view options", () => {
+  it("renders all seven fixed view slots and the non-view options", () => {
     const content = buildAdvancedArtEditorContent({
       icon: "icons/ship.webp",
       forwardOffset: 15,
@@ -44,7 +44,7 @@ describe("advanced tactical art editor", () => {
 
   it("serializes the advanced editor result without writing until the caller commits", async () => {
     const input = vi.fn(async (options) => {
-      expect(options.content).toContain(`flags.${MODULE_ID}.art.views.iso-nw`);
+      expect(options.content).toContain(`flags.${MODULE_ID}.art.views.isometric`);
       return {
         [`flags.${MODULE_ID}.art.forwardOffset`]: "30",
         [`flags.${MODULE_ID}.art.mirror.northSouth`]: "on",

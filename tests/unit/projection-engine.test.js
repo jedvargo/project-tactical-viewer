@@ -21,9 +21,9 @@ describe("ProjectionEngine orthographic views", () => {
 
     expect(engine.projectPoint(point, camera("top"))).toEqual({ x: 110, y: 180 });
     expect(engine.projectPoint(point, camera("north"))).toEqual({ x: 110, y: 180 });
-    expect(engine.projectPoint(point, camera("south"))).toEqual({ x: 90, y: 220 });
-    expect(engine.projectPoint(point, camera("east"))).toEqual({ x: 120, y: 220 });
-    expect(engine.projectPoint(point, camera("west"))).toEqual({ x: 80, y: 220 });
+    expect(engine.projectPoint(point, camera("south"))).toEqual({ x: 90, y: 180 });
+    expect(engine.projectPoint(point, camera("east"))).toEqual({ x: 120, y: 180 });
+    expect(engine.projectPoint(point, camera("west"))).toEqual({ x: 80, y: 180 });
   });
 
   it("describes visible, hidden, mirrored, and labeled axes explicitly", () => {
@@ -86,9 +86,9 @@ describe("ProjectionEngine orthographic views", () => {
 
     expect(engine.projectVector(vector, viewCamera("top"))).toEqual({ x: 2, y: -4 });
     expect(engine.projectVector(vector, viewCamera("north"))).toEqual({ x: 2, y: -6 });
-    expect(engine.projectVector(vector, viewCamera("south"))).toEqual({ x: -2, y: 6 });
-    expect(engine.projectVector(vector, viewCamera("east"))).toEqual({ x: 4, y: 6 });
-    expect(engine.projectVector(vector, viewCamera("west"))).toEqual({ x: -4, y: 6 });
+    expect(engine.projectVector(vector, viewCamera("south"))).toEqual({ x: -2, y: -6 });
+    expect(engine.projectVector(vector, viewCamera("east"))).toEqual({ x: 4, y: -6 });
+    expect(engine.projectVector(vector, viewCamera("west"))).toEqual({ x: -4, y: -6 });
   });
 
   it("returns finite point and orientation projections at negative coordinates", () => {
@@ -133,27 +133,27 @@ describe("ProjectionEngine fixed isometric views", () => {
     const expected = {
       "iso-ne": {
         origin: { x: 0, y: 0 },
-        x: { x: rootHalf, y: -rootSixth },
-        y: { x: rootHalf, y: rootSixth },
-        z: { x: 0, y: rootTwoThirds }
+        x: { x: rootHalf, y: rootSixth },
+        y: { x: rootHalf, y: -rootSixth },
+        z: { x: 0, y: -rootTwoThirds }
       },
       "iso-se": {
         origin: { x: 0, y: 0 },
-        x: { x: -rootHalf, y: -rootSixth },
-        y: { x: rootHalf, y: -rootSixth },
-        z: { x: 0, y: rootTwoThirds }
+        x: { x: -rootHalf, y: rootSixth },
+        y: { x: rootHalf, y: rootSixth },
+        z: { x: 0, y: -rootTwoThirds }
       },
       "iso-sw": {
         origin: { x: 0, y: 0 },
-        x: { x: -rootHalf, y: rootSixth },
-        y: { x: -rootHalf, y: -rootSixth },
-        z: { x: 0, y: rootTwoThirds }
+        x: { x: -rootHalf, y: -rootSixth },
+        y: { x: -rootHalf, y: rootSixth },
+        z: { x: 0, y: -rootTwoThirds }
       },
       "iso-nw": {
         origin: { x: 0, y: 0 },
-        x: { x: rootHalf, y: rootSixth },
-        y: { x: -rootHalf, y: rootSixth },
-        z: { x: 0, y: rootTwoThirds }
+        x: { x: rootHalf, y: -rootSixth },
+        y: { x: -rootHalf, y: -rootSixth },
+        z: { x: 0, y: -rootTwoThirds }
       }
     };
 
@@ -186,10 +186,10 @@ describe("ProjectionEngine fixed isometric views", () => {
     expect(projections["iso-se"].x).toBeCloseTo((-point.x + point.y) * rootHalf);
     expect(projections["iso-sw"].x).toBeCloseTo((-point.x - point.y) * rootHalf);
     expect(projections["iso-nw"].x).toBeCloseTo((point.x - point.y) * rootHalf);
-    expect(projections["iso-ne"].y).toBeCloseTo((-point.x + point.y + 2 * point.z) * rootSixth);
-    expect(projections["iso-se"].y).toBeCloseTo((-point.x - point.y + 2 * point.z) * rootSixth);
-    expect(projections["iso-sw"].y).toBeCloseTo((point.x - point.y + 2 * point.z) * rootSixth);
-    expect(projections["iso-nw"].y).toBeCloseTo((point.x + point.y + 2 * point.z) * rootSixth);
+    expect(projections["iso-ne"].y).toBeCloseTo((point.x - point.y - 2 * point.z) * rootSixth);
+    expect(projections["iso-se"].y).toBeCloseTo((point.x + point.y - 2 * point.z) * rootSixth);
+    expect(projections["iso-sw"].y).toBeCloseTo((-point.x + point.y - 2 * point.z) * rootSixth);
+    expect(projections["iso-nw"].y).toBeCloseTo((-point.x - point.y - 2 * point.z) * rootSixth);
   });
 
   it("projects every heading and pitch orientation into finite screen vectors", () => {

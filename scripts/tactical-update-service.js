@@ -211,11 +211,17 @@ export class TacticalUpdateService {
     try {
       const { x, y } = deltaFor(delta, ["x", "y"]);
       const current = this.coordinateAdapter.toTactical(tokenOrPlaceable, scene);
-      const position = this.coordinateAdapter.toTokenPosition(
-        tokenOrPlaceable,
-        scene,
-        { x: current.tacticalX + x, y: current.tacticalY + y }
-      );
+      const position = typeof this.coordinateAdapter.moveByTacticalDelta === "function"
+        ? this.coordinateAdapter.moveByTacticalDelta(
+          tokenOrPlaceable,
+          scene,
+          { x, y }
+        )
+        : this.coordinateAdapter.toTokenPosition(
+          tokenOrPlaceable,
+          scene,
+          { x: current.tacticalX + x, y: current.tacticalY + y }
+        );
       const update = {};
       if (x !== 0) update.x = position.x;
       if (y !== 0) update.y = position.y;
@@ -233,12 +239,40 @@ export class TacticalUpdateService {
     }
   }
 
+  /** Commit a snapped absolute XY position produced by the viewer drag preview. */
+  async moveXYToPosition(tokenOrPlaceable, scene, position, snapshot) {
+    try {
+      if (!Number.isFinite(position?.x) || !Number.isFinite(position?.y)) {
+        return rejected("invalid-position");
+      }
+      const current = tokenOrPlaceable?.document ?? tokenOrPlaceable;
+      const update = {};
+      if (position.x !== current?.x) update.x = position.x;
+      if (position.y !== current?.y) update.y = position.y;
+      return await this.commit(tokenOrPlaceable, update, {
+        snapshot,
+        fields: [
+          ...(update.x === undefined ? [] : ["x"]),
+          ...(update.y === undefined ? [] : ["y"])
+        ],
+        action: UPDATE_ACTIONS.MOVE,
+        movement: true
+      });
+    } catch (error) {
+      return rejected("invalid", { error });
+    }
+  }
+
   async moveXZ(tokenOrPlaceable, scene, delta, snapshot) {
     return this.moveVerticalPlane(tokenOrPlaceable, scene, delta, snapshot, "x");
   }
 
   async moveYZ(tokenOrPlaceable, scene, delta, snapshot) {
     return this.moveVerticalPlane(tokenOrPlaceable, scene, delta, snapshot, "y");
+  }
+
+  async moveZ(tokenOrPlaceable, scene, delta, snapshot) {
+    return this.moveVerticalPlane(tokenOrPlaceable, scene, delta, snapshot, "x");
   }
 
   /** Commit the one partial update selected by an orthographic projection. */
@@ -266,7 +300,14 @@ export class TacticalUpdateService {
           y: current.tacticalY
         };
         target[horizontalAxis] += horizontal[horizontalAxis];
-        const position = this.coordinateAdapter.toTokenPosition(tokenOrPlaceable, scene, target);
+        const position = typeof this.coordinateAdapter.moveByTacticalDelta === "function"
+          ? this.coordinateAdapter.moveByTacticalDelta(
+            tokenOrPlaceable,
+            scene,
+            { x: horizontalAxis === "x" ? horizontal[horizontalAxis] : 0,
+              y: horizontalAxis === "y" ? horizontal[horizontalAxis] : 0 }
+          )
+          : this.coordinateAdapter.toTokenPosition(tokenOrPlaceable, scene, target);
         update[horizontalAxis] = position[horizontalAxis === "x" ? "x" : "y"];
         fields.push(horizontalAxis);
       }
@@ -348,6 +389,24 @@ export class TacticalUpdateService {
       fields: [dimension],
       action: UPDATE_ACTIONS.CONFIGURE
     });
+  }
+
+  /** Delete a placed TokenDocument through the same permission boundary as edits. */
+  async deleteToken(tokenOrPlaceable) {
+    const document = documentOf(tokenOrPlaceable);
+    if (!this.permissionService.canDelete(tokenOrPlaceable)) {
+      return rejected("permission");
+    }
+    if (typeof document?.delete !== "function") {
+      return rejected("document-delete-unavailable");
+    }
+
+    try {
+      const deletedDocument = await document.delete();
+      return result("accepted", { document: deletedDocument ?? document });
+    } catch (error) {
+      return rejected("delete-failed", { error });
+    }
   }
 
   /** Persist placed-token or prototype-token tactical defaults as one partial update. */

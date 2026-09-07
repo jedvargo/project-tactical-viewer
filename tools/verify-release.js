@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
@@ -36,6 +36,10 @@ export async function verifyRelease() {
       || path.startsWith("tools/"))) {
       throw new Error("Release contains a third-party/runtime dependency");
     }
+    // The release must not ship package.json, but Node needs a module scope
+    // marker when importing the extracted .js entrypoint during verification.
+    // Keep this marker confined to the disposable verification directory.
+    writeFileSync(join(installDirectory, "package.json"), '{"type":"module"}\n');
     await import(pathToFileURL(join(installDirectory, manifest.esmodules[0])).href);
     return { archive, installDirectory, files: installedFiles };
   } finally {

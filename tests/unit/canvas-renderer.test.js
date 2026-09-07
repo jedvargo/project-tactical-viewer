@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   Canvas2DRendererV1,
+  DEFAULT_GRID_MARGIN,
+  createBottomRenderModel,
   createIsometricRenderModel,
   createNorthRenderModel,
   createSouthRenderModel,
@@ -24,10 +26,13 @@ function fakeContext() {
     beginPath: vi.fn(() => calls.push(["beginPath"])),
     moveTo: vi.fn((...args) => calls.push(["moveTo", ...args])),
     lineTo: vi.fn((...args) => calls.push(["lineTo", ...args])),
+    closePath: vi.fn(() => calls.push(["closePath"])),
     stroke: vi.fn(() => calls.push(["stroke"])),
     arc: vi.fn((...args) => calls.push(["arc", ...args])),
+    clip: vi.fn(() => calls.push(["clip"])),
     drawImage: vi.fn((...args) => calls.push(["drawImage", ...args])),
     translate: vi.fn((...args) => calls.push(["translate", ...args])),
+    transform: vi.fn((...args) => calls.push(["transform", ...args])),
     rotate: vi.fn((...args) => calls.push(["rotate", ...args])),
     scale: vi.fn((...args) => calls.push(["scale", ...args])),
     fill: vi.fn(() => calls.push(["fill"])),
@@ -87,6 +92,20 @@ function renderInput(states, overrides = {}) {
 }
 
 describe("Canvas2DRendererV1", () => {
+  it("fits an initial grid inside the viewport with the default outer margin", () => {
+    const model = createTopRenderModel({
+      scene: scene(),
+      coordinateAdapter: new CoordinateAdapter(),
+      projectionEngine: new ProjectionEngine(),
+      viewport: { width: 600, height: 400 }
+    });
+
+    expect(DEFAULT_GRID_MARGIN).toBe(24);
+    expect(model.camera.scale).toBe(88);
+    expect(model.grid.verticalLines[0].start).toEqual({ x: 36, y: 376 });
+    expect(model.grid.horizontalLines[0].start).toEqual({ x: 36, y: 376 });
+  });
+
   it("supports custom grid dimensions and opacity in every projection", () => {
     const model = createIsometricRenderModel({
       view: "iso-ne",
@@ -105,6 +124,21 @@ describe("Canvas2DRendererV1", () => {
     expect(model.grid.lines.length).toBeGreaterThan(0);
   });
 
+  it("keeps the configured Z grid size when a token is above its bounds", () => {
+    const model = createNorthRenderModel({
+      scene: scene(),
+      tacticalStates: [state({ tacticalZ: 30 })],
+      viewport: { width: 600, height: 400 },
+      zoom: 20,
+      focus: { x: 1.5, y: 1, z: 2.5 },
+      gridDimensions: { x: 3, y: 2, z: 5 }
+    });
+
+    expect(model.grid.zMin).toBe(0);
+    expect(model.grid.zMax).toBe(5);
+    expect(model.grid.horizontalLines).toHaveLength(6);
+  });
+
   it("draws the configured tactical icon in an isometric panel", () => {
     const image = { source: "ship.webp" };
     const assetManager = {
@@ -117,7 +151,7 @@ describe("Canvas2DRendererV1", () => {
       tacticalStates: [state({ art: { icon: "ship.webp" } })],
       viewport: { width: 600, height: 400 },
       zoom: 40,
-      focus: { x: 2.5, y: 1.5, z: 0 }
+      focus: { x: 2.5, y: 1.5, z: 2.5 }
     });
     const context = fakeContext();
 
@@ -130,6 +164,71 @@ describe("Canvas2DRendererV1", () => {
 
     expect(assetManager.peekArt).toHaveBeenCalledWith(model.tokens[0].art, "iso-ne");
     expect(context.calls.some(([name, value]) => name === "drawImage" && value === image)).toBe(true);
+  });
+
+  it("renders an isometric token with art on the front face, rotated by heading and pitch", () => {
+    const image = { source: "ship.webp" };
+    const model = createIsometricRenderModel({
+      view: "iso-ne",
+      scene: scene(),
+      tacticalStates: [state({
+        width: 2,
+        height: 1,
+        depth: 3,
+        heading: 90,
+        pitch: 0,
+        art: { icon: "ship.webp" }
+      })],
+      viewport: { width: 600, height: 400 },
+      zoom: 40,
+      focus: { x: 2.5, y: 1.5, z: 3.5 }
+    });
+    const context = fakeContext();
+
+    new Canvas2DRendererV1({
+      assetManager: { peekArt: () => ({ image, mirrored: false }), loadArt: vi.fn() }
+    }).render({
+      canvas: { width: 600, height: 400 },
+      context,
+      viewport: { width: 600, height: 400 },
+      model
+    });
+
+    expect(model.tokens[0]).toMatchObject({ isometric: true, width: 2, height: 1, depth: 3 });
+    expect(context.calls.filter(([name]) => name === "fill")).toHaveLength(3);
+    expect(context.calls.filter(([name]) => name === "transform")).toHaveLength(1);
+    const imageTransform = context.calls.find(([name]) => name === "transform");
+    expect(imageTransform[5]).toBeCloseTo(260, 0);
+    expect(imageTransform[6]).toBeCloseTo(144, 0);
+    expect(context.calls).toContainEqual(["rotate", Math.PI / 2]);
+    expect(context.calls).toContainEqual(["drawImage", image, 0, 0, 1, 1]);
+  });
+
+  it.each([
+    ["dashes", [8, 6]],
+    ["dots", [1, 5]]
+  ])("applies the %s pattern to every isometric grid line", (gridStyle, pattern) => {
+    const model = createIsometricRenderModel({
+      view: "iso-ne",
+      scene: scene(),
+      overlays: { gridStyle },
+      viewport: { width: 600, height: 400 },
+      zoom: 20,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+    const context = fakeContext();
+
+    new Canvas2DRendererV1().render({
+      canvas: { width: 600, height: 400 },
+      context,
+      viewport: { width: 600, height: 400 },
+      model
+    });
+
+    const patternedLines = context.calls.filter(([name, value]) =>
+      name === "setLineDash" && JSON.stringify(value) === JSON.stringify(pattern)
+    );
+    expect(patternedLines).toHaveLength(model.grid.lines.length);
   });
 
   it("renders a rectangular token footprint across the grid", () => {
@@ -160,6 +259,25 @@ describe("Canvas2DRendererV1", () => {
       multiCell: true
     });
     expect(context.calls).toContainEqual(["drawImage", image, -100, -50, 200, 100]);
+  });
+
+  it("renders a depth-only token footprint in vertical views", () => {
+    const model = createNorthRenderModel({
+      scene: scene(),
+      tacticalStates: [state({ depth: 3 })],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 1.5, z: 0 }
+    });
+
+    expect(model.tokens[0]).toMatchObject({
+      width: 1,
+      height: 1,
+      depth: 3,
+      footprintWidth: 100,
+      footprintHeight: 300,
+      multiCell: true
+    });
   });
 
   it("loads only visible token presets and keeps the generated marker and vector when images fail", async () => {
@@ -267,7 +385,7 @@ describe("Canvas2DRendererV1", () => {
 
     expect(model.tokens[0].heading).toBe(0);
     expect(assetManager.peekArt).toHaveBeenCalledWith(model.tokens[0].art, "top");
-    expect(context.calls).toContainEqual(["drawImage", imageSource, -12, -12, 24, 24]);
+    expect(context.calls).toContainEqual(["drawImage", imageSource, -50, -50, 100, 100]);
     expect(context.calls.some(([name, value]) => name === "rotate" && value !== 0)).toBe(true);
   });
 
@@ -318,7 +436,7 @@ describe("Canvas2DRendererV1", () => {
       tacticalStates: [state({ art: { views: { north: "north.webp" } } })],
       viewport: { width: 600, height: 400 },
       zoom: 100,
-      focus: { x: 2.5, y: 1.5, z: 0 }
+      focus: { x: 2.5, y: 1.5, z: 2.5 }
     });
     const context = fakeContext();
 
@@ -342,7 +460,7 @@ describe("Canvas2DRendererV1", () => {
       tacticalStates: [state({ tacticalX: 2.5, tacticalY: 9, tacticalZ: 2 })],
       viewport: { width: 600, height: 400 },
       zoom: 100,
-      focus: { x: 0, y: 9, z: 0 }
+      focus: { x: 0, y: 9, z: 2.5 }
     });
 
     expect(model.view).toBe("north");
@@ -351,7 +469,22 @@ describe("Canvas2DRendererV1", () => {
       vertical: "+Z Up",
       hidden: "+Y South"
     });
-    expect(model.tokens[0].point).toEqual({ x: 550, y: 0 });
+    expect(model.tokens[0].point).toEqual({ x: 550, y: 200 });
+  });
+
+  it("keeps Bottom as an XY projection instead of falling back to Top", () => {
+    const model = createBottomRenderModel({
+      scene: scene(),
+      coordinateAdapter: new CoordinateAdapter(),
+      projectionEngine: new ProjectionEngine(),
+      tacticalStates: [],
+      viewport: { width: 600, height: 400 },
+      zoom: 100,
+      focus: { x: 2.5, y: 2.5, z: 1 }
+    });
+
+    expect(model.view).toBe("bottom");
+    expect(model.camera.view).toBe("bottom");
   });
 
   it("renders the compact off-grid indicator in North", () => {
@@ -375,7 +508,7 @@ describe("Canvas2DRendererV1", () => {
       model
     });
 
-    expect(context.calls).toContainEqual(["fillText", "OFF GRID", 312, 244]);
+    expect(context.calls).toContainEqual(["fillText", "OFF GRID", 350, 156]);
   });
 
   it("draws the projected Top grid, token center, orientation vector, and labels", () => {
@@ -384,15 +517,30 @@ describe("Canvas2DRendererV1", () => {
 
     expect(model.grid.verticalLines.length).toBe(7);
     expect(model.grid.horizontalLines.length).toBe(5);
-    expect(token.point).toEqual({ x: 250, y: 250 });
-    expect(token.orientation).toEqual({ x: 0, y: 35.35533905932738 });
+    expect(token.point).toEqual({ x: 256, y: 244 });
+    expect(token.orientation).toEqual({ x: 0, y: 31.112698372208094 });
     expect(context.setTransform).toHaveBeenCalledTimes(1);
     expect(context.setTransform).toHaveBeenCalledWith(2, 0, 0, 2, 0, 0);
     expect(context.calls.some(([name]) => name === "stroke")).toBe(true);
-    expect(context.calls).toContainEqual(["arc", 250, 250, 12, 0, 6.283185307179586]);
-    expect(context.calls).toContainEqual(["fillText", "Aurora", 262, 238]);
+    expect(context.calls).toContainEqual(["arc", 256, 244, 44, 0, 6.283185307179586]);
+    expect(context.calls).toContainEqual(["fillText", "Aurora", 300, 200]);
     expect(context.calls.some(([name, value]) => name === "fillText" && value === "P +45°")).toBe(true);
     expect(context.calls).toContainEqual(["setLineDash", [5, 3]]);
+  });
+
+  it("snaps displayed headings without changing the projected orientation", () => {
+    const { context, model } = renderInput([state({ heading: 12.6 })]);
+
+    expect(model.tokens[0].heading).toBe(12.6);
+    expect(context.calls.some(([name, value]) => name === "fillText" && value === "H 000°")).toBe(true);
+  });
+
+  it("draws axis labels only when debug axes are enabled", () => {
+    const hidden = renderInput([state()]);
+    const shown = renderInput([state()], { overlays: { debugAxes: true } });
+
+    expect(hidden.context.calls.some(([name, value]) => name === "fillText" && value === "+X East")).toBe(false);
+    expect(shown.context.calls.some(([name, value]) => name === "fillText" && value === "+X East")).toBe(true);
   });
 
   it("culls an offscreen token and never draws an invisible token", () => {
@@ -415,7 +563,7 @@ describe("Canvas2DRendererV1", () => {
       height: 2
     })]);
 
-    expect(model.tokens[0].point).toEqual({ x: 350, y: 150 });
+    expect(model.tokens[0].point).toEqual({ x: 344, y: 156 });
   });
 
   it("renders a local XY preview at the candidate anchor while preserving Z", () => {
@@ -431,7 +579,7 @@ describe("Canvas2DRendererV1", () => {
     });
 
     expect(model.tokens[0]).toMatchObject({
-      point: { x: 350, y: 150 },
+      point: { x: 344, y: 156 },
       tacticalX: 3.5,
       tacticalY: 2.5,
       tacticalZ: 7,
@@ -539,7 +687,7 @@ describe("Canvas2DRendererV1", () => {
       model
     });
 
-    expect(context.calls).toContainEqual(["fillText", "x2", 312, 188]);
+    expect(context.calls).toContainEqual(["fillText", "x2", 350, 150]);
     const lastSelectionDash = context.calls.findLastIndex(([name, value]) =>
       name === "setLineDash" && value?.[0] === 5
     );

@@ -31,14 +31,12 @@ describe("shared tactical constants", () => {
   it("defines the fixed views in the specification order", () => {
     expect(VIEW_DEFINITIONS).toEqual([
       { id: "top", name: "Top" },
-      { id: "north", name: "North" },
-      { id: "south", name: "South" },
-      { id: "east", name: "East" },
-      { id: "west", name: "West" },
-      { id: "iso-ne", name: "Isometric NE" },
-      { id: "iso-se", name: "Isometric SE" },
-      { id: "iso-sw", name: "Isometric SW" },
-      { id: "iso-nw", name: "Isometric NW" }
+      { id: "bottom", name: "Bottom" },
+      { id: "left", name: "Left" },
+      { id: "right", name: "Right" },
+      { id: "front", name: "Front" },
+      { id: "back", name: "Back" },
+      { id: "isometric", name: "Isometric" }
     ]);
   });
 });

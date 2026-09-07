@@ -599,16 +599,14 @@ Every panel selects exactly one of these v1 views:
 | View ID | Display name | Projection |
 |---|---|---|
 | `top` | Top | XY |
-| `north` | North | XZ |
-| `south` | South | XZ |
-| `east` | East | YZ |
-| `west` | West | YZ |
-| `iso-ne` | Isometric NE | XYZ |
-| `iso-se` | Isometric SE | XYZ |
-| `iso-sw` | Isometric SW | XYZ |
-| `iso-nw` | Isometric NW | XYZ |
+| `bottom` | Bottom | XY |
+| `left` | Left | YZ |
+| `right` | Right | YZ |
+| `front` | Front | XZ |
+| `back` | Back | XZ |
+| `isometric` | Isometric | XYZ |
 
-The names North/South/East/West identify the camera side of the battlefield.
+The names identify the camera side of the battlefield relative to the viewer.
 
 The viewer shall show small axis labels so users do not have to remember projection mirroring.
 
@@ -635,9 +633,9 @@ Top displays:
 - optional Z/elevation label;
 - optional pitch indicator.
 
-## 20.2 North
+## 20.2 Front
 
-North camera is positioned north of the battlefield looking south.
+Front camera is positioned at the front of the battlefield.
 
 ```text
 visible axes = X/Z
@@ -647,13 +645,13 @@ screen up    = +Z
 
 The screen horizontal axis shall be labeled explicitly to avoid left/right ambiguity.
 
-## 20.3 South
+## 20.3 Back
 
-South is the opposing X/Z projection.
+Back is the opposing X/Z projection.
 
-## 20.4 East
+## 20.4 Right
 
-East camera is positioned east of the battlefield looking west.
+Right camera is positioned at the right of the battlefield.
 
 ```text
 visible axes = Y/Z
@@ -661,21 +659,18 @@ hidden axis  = X
 screen up    = +Z
 ```
 
-## 20.5 West
+## 20.5 Left
 
-West is the opposing Y/Z projection.
+Left is the opposing Y/Z projection.
 
 The exact projection matrices shall live in the projection engine and have automated inverse/round-trip tests.
 
 ---
 
-# 21. Isometric Views
+# 21. Isometric View
 
-The four isometric projections are fixed.
-
-`Isometric NE` means the virtual camera is above and northeast of the battlefield, looking toward the tactical center.
-
-Equivalent definitions apply to SE, SW, and NW.
+The Isometric projection is fixed, with the virtual camera above the tactical
+center and equal-axis orthographic depth ordering.
 
 Isometric panels support:
 

@@ -1,4 +1,10 @@
-import { ALLOWED_PITCHES, CURRENT_SCHEMA_VERSION, MODULE_ID, VIEW_DEFINITIONS } from "../constants.js";
+import {
+  ALLOWED_PITCHES,
+  canonicalViewId,
+  CURRENT_SCHEMA_VERSION,
+  MODULE_ID,
+  VIEW_DEFINITIONS
+} from "../constants.js";
 import {
   buildTokenFlagUpdate as buildModelTokenFlagUpdate,
   normalizeTokenArt
@@ -59,7 +65,14 @@ export function serializeTokenConfiguration(
 ) {
   const views = Object.fromEntries(VIEW_DEFINITIONS.map(({ id }) => [
     id,
-    textValue(source, `flags.${MODULE_ID}.art.views.${id}`, fallbackArt?.views?.[id] ?? "")
+    textValue(
+      source,
+      `flags.${MODULE_ID}.art.views.${id}`,
+      fallbackArt?.views?.[id]
+        ?? Object.entries(fallbackArt?.views ?? {})
+          .find(([view]) => canonicalViewId(view) === id)?.[1]
+        ?? ""
+    )
   ]));
   const art = normalizeTokenArt({
     preset: textValue(source, `flags.${MODULE_ID}.art.preset`, fallbackArt?.preset ?? "generic-ship"),

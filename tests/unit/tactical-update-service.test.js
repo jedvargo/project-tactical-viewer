@@ -142,6 +142,21 @@ describe("TacticalUpdateService", () => {
     expect(token.update).toHaveBeenCalledTimes(1);
   });
 
+  it("commits an absolute snapped XY position without recalculating from a stale delta", async () => {
+    const { scene, service } = makeService();
+    const token = makeToken({ x: 100, y: 100 });
+
+    const result = await service.moveXYToPosition(
+      token,
+      scene,
+      { x: 300, y: 0 },
+      service.captureSnapshot(token)
+    );
+
+    expect(result).toMatchObject({ status: "accepted", update: { x: 300, y: 0 } });
+    expect(token.update).toHaveBeenCalledWith({ x: 300, y: 0 });
+  });
+
   it("updates a token footprint as one rectangular size edit", async () => {
     const { service } = makeService();
     const token = makeToken();
@@ -173,6 +188,22 @@ describe("TacticalUpdateService", () => {
 
     expect(result).toMatchObject({ status: "rejected", reason: "permission" });
     expect(token.update).not.toHaveBeenCalled();
+  });
+
+  it("deletes through TokenDocument.delete with delete permission", async () => {
+    const { service } = makeService();
+    const token = makeToken();
+    token.delete = vi.fn(async () => token);
+
+    const result = await service.deleteToken(token);
+
+    expect(result).toMatchObject({ status: "accepted", ok: true, document: token });
+    expect(token.delete).toHaveBeenCalledOnce();
+    expect(token.canUserModify).toHaveBeenCalledWith(
+      { id: "owner", isGM: false },
+      "delete",
+      {}
+    );
   });
 
   it("cancels a stale same-field XY edit without overwriting the remote move", async () => {

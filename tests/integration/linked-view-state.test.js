@@ -179,9 +179,9 @@ describe("Prompt 20 linked viewer state", () => {
   it.each([
     ["top", { x: 4, y: 5.4, z: 7 }, "z"],
     ["north", { x: 4, y: 5, z: 7.4 }, "y"],
-    ["south", { x: 6, y: 5, z: 6.6 }, "y"],
-    ["east", { x: 5, y: 4, z: 6.6 }, "x"],
-    ["west", { x: 5, y: 6, z: 6.6 }, "x"]
+    ["south", { x: 6, y: 5, z: 7.4 }, "y"],
+    ["east", { x: 5, y: 4, z: 7.4 }, "x"],
+    ["west", { x: 5, y: 6, z: 7.4 }, "x"]
   ])("linked %s panning changes visible axes and preserves %s", async (view, expected) => {
     const { application } = await linkedApplication({ panelViews: [view, "top"] });
 

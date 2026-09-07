@@ -58,7 +58,7 @@ describe("Prompt 21 isometric rendering", () => {
     expect(model.view).toBe(view);
     expect(model.tokens[0].point).toEqual(
       projectionEngine.projectPoint(
-        { x: 2, y: 3, z: 1 },
+        { x: 2, y: 3, z: 1.5 },
         model.camera
       )
     );
@@ -161,7 +161,7 @@ describe("Prompt 21 isometric rendering", () => {
       viewport: { width: 600, height: 440 },
       model
     })).toBe(true);
-    expect(context.arc).toHaveBeenCalled();
+    expect(context.lineTo).toHaveBeenCalled();
     expect(context.stroke).toHaveBeenCalled();
     expect(calls.some(([label]) => String(label).includes("Isometric"))).toBe(false);
   });

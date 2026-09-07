@@ -59,8 +59,8 @@ const requiredKeys = [
   "configuration.token.advancedArt",
   "configuration.art.description",
   "configuration.art.forwardReference",
-  "configuration.art.mirrorNorthSouth",
-  "configuration.art.mirrorEastWest",
+  "configuration.art.mirrorFrontBack",
+  "configuration.art.mirrorLeftRight",
   "configuration.art.save",
   "settings.userLayout.name",
   "settings.userLayout.hint",
@@ -107,17 +107,15 @@ describe("English localization", () => {
   it("contains all fixed view labels", () => {
     expect(Object.fromEntries([
       ["top", translations["tactical-3d-viewer.views.top"]],
-      ["north", translations["tactical-3d-viewer.views.north"]],
-      ["south", translations["tactical-3d-viewer.views.south"]],
-      ["east", translations["tactical-3d-viewer.views.east"]],
-      ["west", translations["tactical-3d-viewer.views.west"]],
-      ["iso-ne", translations["tactical-3d-viewer.views.iso-ne"]],
-      ["iso-se", translations["tactical-3d-viewer.views.iso-se"]],
-      ["iso-sw", translations["tactical-3d-viewer.views.iso-sw"]],
-      ["iso-nw", translations["tactical-3d-viewer.views.iso-nw"]]
+      ["bottom", translations["tactical-3d-viewer.views.bottom"]],
+      ["left", translations["tactical-3d-viewer.views.left"]],
+      ["right", translations["tactical-3d-viewer.views.right"]],
+      ["front", translations["tactical-3d-viewer.views.front"]],
+      ["back", translations["tactical-3d-viewer.views.back"]],
+      ["isometric", translations["tactical-3d-viewer.views.isometric"]]
     ])).toEqual({
-      top: "Top", north: "North", south: "South", east: "East", west: "West",
-      "iso-ne": "Isometric NE", "iso-se": "Isometric SE", "iso-sw": "Isometric SW", "iso-nw": "Isometric NW"
+      top: "Top", bottom: "Bottom", left: "Left", right: "Right",
+      front: "Front", back: "Back", isometric: "Isometric"
     });
   });
 });

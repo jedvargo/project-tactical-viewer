@@ -32,9 +32,9 @@ heading/pitch orientation vector remains authoritative.
 ## Panels and links
 
 Choose 1, 2, 3, or 4 panels. Each visible panel independently selects Top,
-North, South, East, West, Isometric NE, Isometric SE, Isometric SW, or
-Isometric NW. Duplicate views are allowed and hidden panel settings are
-retained. Resizable splitters adapt to narrow windows.
+Bottom, Left, Right, Front, Back, or Isometric. Duplicate views are allowed
+and hidden panel settings are retained. Resizable splitters adapt to narrow
+windows.
 
 Panel Options includes a grid-opacity slider. The shared Options menu can set
 the tactical grid X/Y/Z dimensions, background color or image, and choose
@@ -57,7 +57,7 @@ The three user-local links are **Link Selection**, **Link Center**, and
 
 ## Movement and orientation
 
-Top edits X/Y. North and South edit X/Z. East and West edit Y/Z. One vertical
+Top and Bottom edit X/Y. Front and Back edit X/Z. Left and Right edit Y/Z. One vertical
 step changes Foundry elevation by exactly the Scene grid distance. Heading uses
 Foundry token rotation and Tactical Viewer edits it in 45-degree steps. Pitch
 uses the five supported values: +90, +45, 0, -45, and -90 degrees.
@@ -79,7 +79,7 @@ texture is available.
   are rejected for v1 movement.
 - Isometric views are read-only for movement; they support view, selection, pan,
   and zoom only.
-- The viewer uses nine fixed projections. There is no free camera, map rotation,
+- The viewer uses seven fixed projections. There is no free camera, map rotation,
   3D model rendering, collision system, or game-system integration.
 - Off-step external elevations are displayed as off-grid and are not silently
   rewritten by rendering or hooks.

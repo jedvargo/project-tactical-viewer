@@ -85,6 +85,14 @@ describe("TacticalTokenState", () => {
     expect(missingPitchState.pitch).toBe(0);
   });
 
+  it("keeps arbitrary native rotation readable for the editor", () => {
+    const { scene, token } = makeStateFixture({ rotation: 183 });
+    expect(buildTacticalTokenState(token, scene, {
+      coordinateAdapter: new CoordinateAdapter(),
+      orientationAdapter: new OrientationAdapter()
+    }).heading).toBe(3);
+  });
+
   it("builds the complete placed-token state, including anchor, off-grid, orientation, and dimensions", () => {
     const { scene, token } = makeStateFixture({
       width: 3,
@@ -111,8 +119,8 @@ describe("TacticalTokenState", () => {
       sceneId: "scene-1",
       centerX: token.x + 150,
       centerY: token.y + 100,
-      tacticalX: 3.5,
-      tacticalY: 4,
+      tacticalX: 4.5,
+      tacticalY: 3,
       tacticalZ: 1.5,
       elevation: 7.5,
       heading: 90,

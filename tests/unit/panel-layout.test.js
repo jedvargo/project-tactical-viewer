@@ -20,7 +20,7 @@ describe("multi-panel layout model", () => {
     expect(layout.panelCount).toBe(2);
     expect(layout.panels).toHaveLength(4);
     expect(layout.panels.map(({ view }) => view)).toEqual([
-      "east", "east", "west", "north"
+      "right", "right", "left", "front"
     ]);
   });
 

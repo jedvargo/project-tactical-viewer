@@ -23,9 +23,9 @@ function makeFixture({ i, j, width, height, grid }) {
 describe("CoordinateAdapter", () => {
   it.each([
     [{ i: 0, j: 0, width: 1, height: 1 }, { x: 0.5, y: 0.5 }],
-    [{ i: 2, j: 3, width: 2, height: 2 }, { x: 3, y: 4 }],
-    [{ i: 1, j: 4, width: 3, height: 2 }, { x: 2.5, y: 5 }],
-    [{ i: 5, j: 1, width: 1, height: 3 }, { x: 5.5, y: 2.5 }]
+    [{ i: 2, j: 3, width: 2, height: 2 }, { x: 4, y: 3 }],
+    [{ i: 1, j: 4, width: 3, height: 2 }, { x: 5.5, y: 2 }],
+    [{ i: 5, j: 1, width: 1, height: 3 }, { x: 1.5, y: 6.5 }]
   ])("derives the center anchor for a %dx%d footprint", (fixture, expected) => {
     const grid = createFakeSquareGrid({ originX: 40, originY: 60 });
     const { scene, token } = makeFixture({ ...fixture, grid });
@@ -84,6 +84,21 @@ describe("CoordinateAdapter", () => {
     expect(after.height).toBe(height);
   });
 
+  it("keeps tactical X on Foundry grid columns and tactical Y on rows", () => {
+    const grid = createFakeSquareGrid({ originX: 80, originY: 120 });
+    const scene = makeSquareScene(grid);
+    const token = makeToken({
+      x: grid.getTopLeftPoint({ i: 4, j: 5 }).x,
+      y: grid.getTopLeftPoint({ i: 4, j: 5 }).y
+    });
+    const adapter = new CoordinateAdapter();
+
+    expect(adapter.moveByTacticalDelta(token, scene, { x: 1, y: 0 }))
+      .toEqual({ x: token.x + grid.sizeX, y: token.y });
+    expect(adapter.moveByTacticalDelta(token, scene, { x: 0, y: 1 }))
+      .toEqual({ x: token.x, y: token.y + grid.sizeY });
+  });
+
   it("round-trips the anchor without accumulating drift near a Scene boundary", () => {
     const grid = createFakeSquareGrid({ originX: 37, originY: 91 });
     const scene = makeSquareScene(grid);
@@ -105,6 +120,20 @@ describe("CoordinateAdapter", () => {
     expect(adapter.toTactical({ ...token, ...position }, scene).anchorTactical).toEqual(
       original.anchorTactical
     );
+  });
+
+  it("clamps tactical movement to the Scene grid boundary while preserving footprint", () => {
+    const grid = createFakeSquareGrid();
+    const scene = makeSquareScene(grid);
+    const adapter = new CoordinateAdapter();
+    const token = makeToken({ x: 1100, y: 900, width: 1, height: 1 });
+
+    expect(adapter.moveByTacticalDelta(token, scene, { x: 1, y: 1 }))
+      .toEqual({ x: 1100, y: 900 });
+
+    const wideToken = makeToken({ x: 1000, y: 900, width: 2, height: 1 });
+    expect(adapter.moveByTacticalDelta(wideToken, scene, { x: 1, y: 1 }))
+      .toEqual({ x: 1000, y: 900 });
   });
 
   it("rejects an invalid or non-square Scene through SceneEligibilityService", () => {
@@ -224,6 +253,19 @@ describe("CoordinateAdapter", () => {
     expect(snapped).toEqual({ x: 240, y: 360 });
     expect(grid.calls.getSnappedPoint).toHaveLength(1);
     expect(grid.calls.getSnappedPoint[0].behavior).toMatchObject({ mode: 256 });
+  });
+
+  it("snaps a dropped footprint by its top-left cell, not its center cell", () => {
+    const grid = createFakeSquareGrid({ originX: 25, originY: 50 });
+    const scene = makeSquareScene(grid);
+    const token = makeToken({ x: 0, y: 0, width: 2, height: 1 });
+    const adapter = new CoordinateAdapter();
+
+    const snapped = adapter.snapTacticalAnchor(token, scene, { x: 3.7, y: 4.2 });
+
+    expect(snapped.position).toEqual({ x: 325, y: 450 });
+    expect(snapped.tacticalX).toBe(4);
+    expect(snapped.tacticalY).toBe(4.5);
   });
 
   it("rejects non-positive grid distance for every elevation conversion", () => {

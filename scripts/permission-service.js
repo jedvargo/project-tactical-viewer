@@ -47,13 +47,13 @@ export class PermissionService {
     });
   }
 
-  canUserModify(tokenOrPlaceable, updateData = {}) {
+  canUserModify(tokenOrPlaceable, updateData = {}, action = "update") {
     const document = documentOf(tokenOrPlaceable);
     if (!document || typeof document !== "object") return false;
 
     const user = this.getCurrentUser();
     if (typeof document.canUserModify === "function") {
-      return document.canUserModify(user, "update", updateData) === true;
+      return document.canUserModify(user, action, updateData) === true;
     }
 
     // This fallback only uses explicit, document-provided authority signals;
@@ -86,13 +86,18 @@ export class PermissionService {
     return this.canUpdate(tokenOrPlaceable, {}, { action: "rotate" });
   }
 
+  canDelete(tokenOrPlaceable) {
+    return this.canUserModify(tokenOrPlaceable, {}, "delete");
+  }
+
   getCapabilities(tokenOrPlaceable) {
     const lockState = this.getLockState(tokenOrPlaceable);
     return Object.freeze({
       ...lockState,
       canUpdate: this.canUpdate(tokenOrPlaceable),
       canMove: this.canMove(tokenOrPlaceable),
-      canRotate: this.canRotate(tokenOrPlaceable)
+      canRotate: this.canRotate(tokenOrPlaceable),
+      canDelete: this.canDelete(tokenOrPlaceable)
     });
   }
 }

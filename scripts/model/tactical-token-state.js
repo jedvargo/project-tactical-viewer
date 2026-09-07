@@ -93,6 +93,7 @@ export class TacticalTokenState {
       canCurrentUserUpdate: capabilities.canUpdate,
       canCurrentUserMove: capabilities.canMove,
       canCurrentUserRotate: capabilities.canRotate,
+      canCurrentUserDelete: capabilities.canDelete,
       locked: capabilities.locked,
       lockRotation: capabilities.lockRotation
     });

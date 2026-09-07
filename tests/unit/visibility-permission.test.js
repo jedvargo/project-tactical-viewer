@@ -111,4 +111,14 @@ describe("PermissionService", () => {
       "flags.tactical-3d-viewer.pitch": 45
     })).toBe(false);
   });
+
+  it("uses the delete action when checking deletion permission", () => {
+    const user = { id: "owner", isGM: false };
+    const canUserModify = vi.fn(() => true);
+    const document = tokenDocument({ canUserModify });
+    const service = new PermissionService({ currentUser: user });
+
+    expect(service.canDelete(document)).toBe(true);
+    expect(canUserModify).toHaveBeenCalledWith(user, "delete", {});
+  });
 });

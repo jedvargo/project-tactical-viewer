@@ -103,7 +103,7 @@ describe("user layout migrations", () => {
     });
     expect(migrated.scenes["scene-a"]).toMatchObject({
       panelCount: 2,
-      panels: [{ view: "top" }, { view: "north" }, { view: "iso-ne" }, { view: "west" }],
+      panels: [{ view: "top" }, { view: "front" }, { view: "isometric" }, { view: "left" }],
       splits: [0.7, 0.3],
       customSafeField: "also-preserve"
     });
@@ -129,7 +129,7 @@ describe("user layout migrations", () => {
       }
     });
 
-    expect(layout.scenes.healthy.panels[0].view).toBe("east");
+    expect(layout.scenes.healthy.panels[0].view).toBe("right");
     expect(layout.scenes.corrupt).toBeUndefined();
 
     const service = new PersistenceService({
@@ -142,7 +142,7 @@ describe("user layout migrations", () => {
       })
     });
     service.initialize();
-    expect(service.getSceneLayout("healthy").panels[0].view).toBe("east");
+    expect(service.getSceneLayout("healthy").panels[0].view).toBe("right");
     expect(service.getSceneLayout("corrupt").panels[0].view).toBe("top");
     expect(service.getAllSceneLayouts()).toHaveProperty("healthy");
   });
@@ -189,10 +189,10 @@ describe("user-local persistence service", () => {
     await service.saveSceneLayout("scene-p19", {
       panelCount: 3,
       panels: [
-        { view: "east", overlays: { names: false } },
-        { view: "east" },
-        { view: "south" },
-        { view: "west" }
+        { view: "right", overlays: { names: false } },
+        { view: "right" },
+        { view: "back" },
+        { view: "left" }
       ],
       splits: [0.35, 0.65],
       links: { selection: false, center: true, zoom: false }
@@ -204,7 +204,7 @@ describe("user-local persistence service", () => {
       splits: [0.35, 0.65],
       links: { selection: false, center: true, zoom: false }
     });
-    expect(loaded.panels.map(({ view }) => view)).toEqual(["east", "east", "south", "west"]);
+    expect(loaded.panels.map(({ view }) => view)).toEqual(["right", "right", "back", "left"]);
     expect(loaded.panels[0].overlays.names).toBe(false);
   });
 
@@ -236,10 +236,10 @@ describe("user-local persistence service", () => {
     userB.initialize();
     await userA.saveSceneLayout("scene-a", {
       panelCount: 4,
-      panels: [{ view: "west" }]
+      panels: [{ view: "left" }]
     }, { lastUsed: 100 });
 
-    expect(userA.getSceneLayout("scene-a").panels[0].view).toBe("west");
+    expect(userA.getSceneLayout("scene-a").panels[0].view).toBe("left");
     expect(userB.getSceneLayout("scene-a").panels[0].view).toBe("top");
     expect(userB.getPreferences()).toEqual(DEFAULT_USER_LAYOUT);
   });

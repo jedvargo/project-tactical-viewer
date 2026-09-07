@@ -63,7 +63,14 @@ function makeModel(token, { canMove = true } = {}) {
   };
 }
 
-function makeController({ token = makeDocument(), canMove = true, updateResult } = {}) {
+function makeController({
+  token = makeDocument(),
+  canMove = true,
+  updateResult,
+  useAbsolutePosition = false,
+  onHeadingDelta,
+  onPitchDelta
+} = {}) {
   const grid = createFakeSquareGrid();
   const scene = makeSquareScene(grid);
   const coordinateAdapter = new CoordinateAdapter();
@@ -77,7 +84,10 @@ function makeController({ token = makeDocument(), canMove = true, updateResult }
       rotation: token.rotation,
       pitch: 0
     })),
-    moveXY: vi.fn(async () => updateResult ?? { status: "accepted", ok: true })
+    moveXY: vi.fn(async () => updateResult ?? { status: "accepted", ok: true }),
+    ...(useAbsolutePosition ? {
+      moveXYToPosition: vi.fn(async () => updateResult ?? { status: "accepted", ok: true })
+    } : {})
   };
   const controller = new PanelInputController({
     element: surface(),
@@ -89,12 +99,33 @@ function makeController({ token = makeDocument(), canMove = true, updateResult }
     getRenderModel: () => makeModel(token, { canMove }),
     onMovementPreview: (preview) => previewEvents.push(preview),
     onActionResult: actionResult,
+    onHeadingDelta,
+    onPitchDelta,
     onSelectionChanged: vi.fn()
   });
   return { controller, service, previewEvents, actionResult, token };
 }
 
 describe("Top tactical interaction", () => {
+  it.each([
+    ["left", 100, { x: -1, y: 0 }],
+    ["right", 300, { x: 1, y: 0 }]
+  ])("dragging %s changes only the tactical X axis", async (_direction, clientX, delta) => {
+    const token = makeDocument({ x: 200, y: 200 });
+    const { controller, service } = makeController({ token });
+
+    controller.handlePointerDown(pointer("pointerdown", 200, 150));
+    controller.handlePointerMove(pointer("pointermove", clientX, 150));
+    await controller.handlePointerUp(pointer("pointerup", clientX, 150));
+
+    expect(service.moveXY).toHaveBeenCalledWith(
+      token,
+      expect.any(Object),
+      delta,
+      expect.any(Object)
+    );
+  });
+
   it("shows preview only during drag, converts a diagonal cell destination, preserves Z, and commits once", async () => {
     const { controller, service, previewEvents, token } = makeController();
 
@@ -123,6 +154,74 @@ describe("Top tactical interaction", () => {
     );
     expect(previewEvents.at(-1)).toBeNull();
     expect(token.elevation).toBe(15);
+  });
+
+  it("uses the pointer-up location when the final move event is missing", async () => {
+    const token = makeDocument({ x: 200, y: 200 });
+    const { controller, service } = makeController({ token });
+
+    controller.handlePointerDown(pointer("pointerdown", 200, 150));
+    // Cross the drag threshold without crossing a grid cell, then release in
+    // the next cell. Browsers are allowed to omit a final pointermove.
+    controller.handlePointerMove(pointer("pointermove", 230, 150));
+    await controller.handlePointerUp(pointer("pointerup", 300, 150));
+
+    expect(service.moveXY).toHaveBeenCalledWith(
+      token,
+      expect.any(Object),
+      { x: 1, y: 0 },
+      expect.any(Object)
+    );
+  });
+
+  it("commits the snapped absolute grid position from the drag preview", async () => {
+    const token = makeDocument({ x: 200, y: 200 });
+    const { controller, service } = makeController({ token, useAbsolutePosition: true });
+
+    controller.handlePointerDown(pointer("pointerdown", 200, 150));
+    controller.handlePointerMove(pointer("pointermove", 300, 150));
+    await controller.handlePointerUp(pointer("pointerup", 300, 150));
+
+    expect(service.moveXYToPosition).toHaveBeenCalledWith(
+      token,
+      expect.any(Object),
+      { x: 300, y: 200 },
+      expect.any(Object)
+    );
+    expect(service.moveXY).not.toHaveBeenCalled();
+  });
+
+  it("queues heading and pitch shortcuts behind a pending drag commit", async () => {
+    let resolveMove;
+    const pendingMove = new Promise((resolve) => { resolveMove = resolve; });
+    const headingDelta = vi.fn(async () => ({ status: "accepted", ok: true }));
+    const pitchDelta = vi.fn(async () => ({ status: "accepted", ok: true }));
+    const { controller } = makeController({
+      token: makeDocument({ x: 200, y: 200 }),
+      updateResult: pendingMove,
+      onHeadingDelta: headingDelta,
+      onPitchDelta: pitchDelta
+    });
+    const event = (key) => ({
+      key,
+      target: { tagName: "CANVAS" },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn()
+    });
+
+    controller.handlePointerDown(pointer("pointerdown", 200, 150));
+    controller.handlePointerMove(pointer("pointermove", 300, 150));
+    const drag = controller.handlePointerUp(pointer("pointerup", 300, 150));
+    const heading = controller.handleKeyDown(event("]"));
+    const pitch = controller.handleKeyDown(event("."));
+
+    expect(headingDelta).not.toHaveBeenCalled();
+    expect(pitchDelta).not.toHaveBeenCalled();
+    resolveMove({ status: "accepted", ok: true });
+    await Promise.all([drag, heading, pitch]);
+
+    expect(headingDelta).toHaveBeenCalledWith(45);
+    expect(pitchDelta).toHaveBeenCalledWith(1);
   });
 
   it("anchors a multi-cell token by its center for a one-cell move", () => {

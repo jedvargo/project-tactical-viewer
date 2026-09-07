@@ -27,6 +27,10 @@ function orthographicDefinition(projectionEngine, view) {
   return definition.basis ? null : definition;
 }
 
+function isometricView(view) {
+  return view === "isometric" || (typeof view === "string" && view.startsWith("iso-"));
+}
+
 function editableTarget(target) {
   const tagName = String(target?.tagName ?? "").toUpperCase();
   return tagName === "INPUT"
@@ -86,6 +90,26 @@ export function getProjectedTokenCandidates(screenPoint, projectedTokens = []) {
     .map(({ token }) => token);
 }
 
+/** Return visible token markers whose centers are inside a screen-space box. */
+export function getProjectedTokensInSelectionBox(selectionBox, projectedTokens = []) {
+  if (!selectionBox || !Array.isArray(projectedTokens)) return [];
+  const left = Math.min(selectionBox.start?.x, selectionBox.end?.x);
+  const right = Math.max(selectionBox.start?.x, selectionBox.end?.x);
+  const top = Math.min(selectionBox.start?.y, selectionBox.end?.y);
+  const bottom = Math.max(selectionBox.start?.y, selectionBox.end?.y);
+  if (![left, right, top, bottom].every(Number.isFinite)) return [];
+  return projectedTokens
+    .filter((token) => token?.visibleToCurrentUser === true && token?.culled !== true)
+    .filter((token) => Number.isFinite(token?.point?.x) && Number.isFinite(token?.point?.y))
+    .filter((token) => token.point.x >= left && token.point.x <= right
+      && token.point.y >= top && token.point.y <= bottom)
+    .sort((leftToken, rightToken) => {
+      const leftId = String(leftToken.tokenId);
+      const rightId = String(rightToken.tokenId);
+      return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+    });
+}
+
 function localPoint(element, event) {
   const rect = element?.getBoundingClientRect?.() ?? { left: 0, top: 0 };
   return {
@@ -111,12 +135,15 @@ export class PanelInputController {
     getRenderModel,
     onSelectionChanged,
     onOverlapChooser,
+    onSelectionBoxChanged,
     onViewChanged,
     onMovementPreview,
     onActionResult,
+    onDeleteToken,
     onHeadingDelta,
     onPitchDelta,
     requestRender,
+    keyboardTarget,
     projectionEngine = new ProjectionEngine(),
     zoomStep = LOGICAL_ZOOM_STEP,
     dragThreshold = 3
@@ -136,12 +163,18 @@ export class PanelInputController {
     this.getRenderModel = typeof getRenderModel === "function" ? getRenderModel : () => null;
     this.onSelectionChanged = onSelectionChanged;
     this.onOverlapChooser = onOverlapChooser;
+    this.onSelectionBoxChanged = onSelectionBoxChanged;
     this.onViewChanged = onViewChanged;
     this.onMovementPreview = onMovementPreview;
     this.onActionResult = onActionResult;
+    this.onDeleteToken = onDeleteToken;
     this.onHeadingDelta = onHeadingDelta;
     this.onPitchDelta = onPitchDelta;
     this.requestRender = requestRender;
+    // Keyboard events from a focused canvas bubble through its panel surface.
+    // Keeping this target separate also lets arrow keys work when focus is on
+    // one of the panel's movement controls.
+    this.keyboardTarget = keyboardTarget ?? element;
     this.projectionEngine = projectionEngine;
     this.zoomStep = zoomStep > 1 ? zoomStep : LOGICAL_ZOOM_STEP;
     this.dragThreshold = Math.max(0, dragThreshold);
@@ -149,6 +182,9 @@ export class PanelInputController {
     this.pointerStart = undefined;
     this.pointerLast = undefined;
     this.pointerMoved = false;
+    this.pointerButton = undefined;
+    this.pointerToken = undefined;
+    this.selectionBox = undefined;
     this.dragToken = undefined;
     this.dragDocument = undefined;
     this.dragSnapshot = undefined;
@@ -157,12 +193,17 @@ export class PanelInputController {
     this.movementPreview = undefined;
     this.overlapCycleKey = undefined;
     this.overlapCycleIndex = 0;
+    // Keyboard auto-repeat and rapid control clicks must be applied in order.
+    // Otherwise every action can read the same pre-update TokenDocument.
+    this.actionQueue = Promise.resolve();
+    this.actionQueueBusy = false;
     this.attached = false;
 
     this.handlePointerDown = this.handlePointerDown.bind(this);
     this.handlePointerMove = this.handlePointerMove.bind(this);
     this.handlePointerUp = this.handlePointerUp.bind(this);
     this.handlePointerCancel = this.handlePointerCancel.bind(this);
+    this.handleContextMenu = this.handleContextMenu.bind(this);
     this.handleWheel = this.handleWheel.bind(this);
     this.handleKeyDown = this.handleKeyDown.bind(this);
     this.attach();
@@ -174,8 +215,9 @@ export class PanelInputController {
     this.element.addEventListener("pointermove", this.handlePointerMove);
     this.element.addEventListener("pointerup", this.handlePointerUp);
     this.element.addEventListener("pointercancel", this.handlePointerCancel);
+    this.element.addEventListener("contextmenu", this.handleContextMenu);
     this.element.addEventListener("wheel", this.handleWheel, { passive: false });
-    this.element.addEventListener("keydown", this.handleKeyDown);
+    this.keyboardTarget?.addEventListener?.("keydown", this.handleKeyDown);
     this.attached = true;
     return true;
   }
@@ -186,15 +228,82 @@ export class PanelInputController {
     this.element?.removeEventListener?.("pointermove", this.handlePointerMove);
     this.element?.removeEventListener?.("pointerup", this.handlePointerUp);
     this.element?.removeEventListener?.("pointercancel", this.handlePointerCancel);
+    this.element?.removeEventListener?.("contextmenu", this.handleContextMenu);
     this.element?.removeEventListener?.("wheel", this.handleWheel);
-    this.element?.removeEventListener?.("keydown", this.handleKeyDown);
+    this.keyboardTarget?.removeEventListener?.("keydown", this.handleKeyDown);
     this.attached = false;
     this.cancelPointer();
+    this.clearDragState();
+    this.setMovementPreview(null);
+    this.setSelectionBox(null, null);
     return true;
   }
 
   currentModel() {
     return this.getRenderModel() ?? {};
+  }
+
+  enqueueAction(action) {
+    if (!this.actionQueueBusy) {
+      this.actionQueueBusy = true;
+      let result;
+      try {
+        // Start the first action synchronously so a click/key press reaches
+        // the update service before the browser returns to its event loop.
+        result = action();
+      } catch (error) {
+        result = Promise.reject(error);
+      }
+      const current = Promise.resolve(result);
+      this.actionQueue = current;
+      current.then(
+        () => { if (this.actionQueue === current) this.actionQueueBusy = false; },
+        () => { if (this.actionQueue === current) this.actionQueueBusy = false; }
+      );
+      return current;
+    }
+
+    const queued = this.actionQueue.then(action, action);
+    this.actionQueue = queued;
+    queued.then(
+      () => { if (this.actionQueue === queued) this.actionQueueBusy = false; },
+      () => { if (this.actionQueue === queued) this.actionQueueBusy = false; }
+    );
+    return queued;
+  }
+
+  /** Keep viewer-originated movement inside the rendered cell volume. */
+  clampMovementDelta(delta, token, current, model = this.currentModel()) {
+    const grid = model?.grid ?? {};
+    const columns = Number(grid.columns);
+    const rows = Number(grid.rows);
+    const depth = Number(grid.depth ?? grid.z);
+    const width = Math.max(1, Number(token?.width ?? token?.document?.width ?? 1));
+    const height = Math.max(1, Number(token?.height ?? token?.document?.height ?? 1));
+    const tokenDepth = Math.max(1, Number(token?.depth ?? token?.document?.depth ?? 1));
+    const bounds = {
+      x: Number.isFinite(columns) ? [width / 2, columns - width / 2] : null,
+      y: Number.isFinite(rows) ? [height / 2, rows - height / 2] : null,
+      // tactical Z is the bottom of the token's vertical cell footprint.
+      z: Number.isFinite(depth) ? [0, depth - tokenDepth] : null
+    };
+    const bounded = { ...(delta ?? {}) };
+    for (const axis of ["x", "y", "z"]) {
+      const range = bounds[axis];
+      const step = Number(bounded[axis] ?? 0);
+      const value = Number(current?.[`tactical${axis.toUpperCase()}`] ?? current?.[axis]);
+      if (!range || !Number.isInteger(step) || !Number.isFinite(value)) continue;
+      const minimum = Math.min(range[0], range[1]);
+      const maximum = Math.max(range[0], range[1]);
+      const target = value + step;
+      if (target < minimum || target > maximum) {
+        const clamped = Math.min(maximum, Math.max(minimum, target));
+        bounded[axis] = Number.isInteger(value) && Number.isInteger(clamped)
+          ? clamped - value
+          : 0;
+      }
+    }
+    return bounded;
   }
 
   currentCamera() {
@@ -204,7 +313,9 @@ export class PanelInputController {
       ...source,
       view: model.view ?? source.view ?? "top",
       focus: this.panel.focus ?? source.focus ?? { x: 0, y: 0, z: 0 },
-      scale: clampLogicalZoom(this.panel.zoom ?? source.scale ?? DEFAULT_LOGICAL_ZOOM),
+      scale: clampLogicalZoom(this.panel.fitToPanel === true
+        ? source.scale ?? DEFAULT_LOGICAL_ZOOM
+        : this.panel.zoom ?? source.scale ?? DEFAULT_LOGICAL_ZOOM),
       screenCenter: source.screenCenter ?? {
         x: finiteOr(this.panel.dimensions?.width, 0) / 2,
         y: finiteOr(this.panel.dimensions?.height, 0) / 2
@@ -255,8 +366,7 @@ export class PanelInputController {
 
   startTokenDrag(local, token) {
     const view = this.currentCamera().view;
-    if (view?.startsWith("iso-") && token?.visibleToCurrentUser !== false) {
-      this.onSelectionChanged?.(token?.tokenId ?? null, token ?? null);
+    if (isometricView(view) && token?.visibleToCurrentUser !== false) {
       if (token) {
         this.element.style.cursor = "not-allowed";
         this.onActionResult?.({
@@ -288,7 +398,6 @@ export class PanelInputController {
       axis,
       pointerTactical[axis] - tacticalPoint(current)[axis]
     ]));
-    this.onSelectionChanged?.(token.tokenId, token);
     return true;
   }
 
@@ -296,6 +405,19 @@ export class PanelInputController {
     this.movementPreview = preview ?? undefined;
     this.onMovementPreview?.(preview ?? null);
     this.requestRender?.({ type: preview ? "movement-preview" : "movement-preview-cleared" });
+  }
+
+  setSelectionBox(start, end) {
+    if (!start || !end) {
+      this.selectionBox = undefined;
+      this.onSelectionBoxChanged?.(null);
+      this.requestRender?.({ type: "selection-box-cleared" });
+      return null;
+    }
+    this.selectionBox = { start: point(start), end: point(end) };
+    this.onSelectionBoxChanged?.(this.selectionBox);
+    this.requestRender?.({ type: "selection-box", selectionBox: this.selectionBox });
+    return this.selectionBox;
   }
 
   previewTokenAt(local) {
@@ -329,6 +451,7 @@ export class PanelInputController {
       };
       previewPosition = snapped.position;
     }
+    delta = this.clampMovementDelta(delta, this.dragToken, this.dragStartTactical);
     if (Object.values(delta).every((value) => value === 0)) {
       this.setMovementPreview(null);
       return true;
@@ -375,22 +498,35 @@ export class PanelInputController {
     const document = this.dragDocument;
     const snapshot = this.dragSnapshot;
     const token = this.dragToken;
+    const position = preview?.position;
     this.clearDragState();
     const definition = orthographicDefinition(this.projectionEngine, this.currentCamera().view);
     const result = await this.commitMovementDelta(preview?.delta, {
       document,
       token,
       snapshot,
-      definition
+      definition,
+      position
     });
     this.setMovementPreview(null);
     return result;
   }
 
-  async commitMovementDelta(delta, { document, token, snapshot, definition } = {}) {
+  async commitMovementDelta(delta, { document, token, snapshot, definition, position } = {}) {
+    const verticalOnly = delta
+      && Number(delta.x ?? 0) === 0
+      && Number(delta.y ?? 0) === 0
+      && Number(delta.z ?? 0) !== 0;
     const axisKey = definition?.visibleAxes?.join(",");
     const moveMethod = { "x,y": "moveXY", "x,z": "moveXZ", "y,z": "moveYZ" }[axisKey];
-    const move = typeof this.tacticalUpdateService?.moveVisibleAxes === "function"
+    const absoluteXY = axisKey === "x,y"
+      && position
+      && typeof this.tacticalUpdateService?.moveXYToPosition === "function";
+    const move = absoluteXY
+      ? this.tacticalUpdateService.moveXYToPosition.bind(this.tacticalUpdateService)
+      : verticalOnly && typeof this.tacticalUpdateService?.moveZ === "function"
+      ? this.tacticalUpdateService.moveZ.bind(this.tacticalUpdateService)
+      : typeof this.tacticalUpdateService?.moveVisibleAxes === "function"
       ? this.tacticalUpdateService.moveVisibleAxes.bind(this.tacticalUpdateService)
       : (typeof this.tacticalUpdateService?.[moveMethod] === "function"
         ? this.tacticalUpdateService[moveMethod].bind(this.tacticalUpdateService)
@@ -399,7 +535,11 @@ export class PanelInputController {
       return null;
     }
 
-    const result = typeof this.tacticalUpdateService?.moveVisibleAxes === "function"
+    const result = absoluteXY
+      ? await move(document, this.scene, position, snapshot)
+      : verticalOnly && typeof this.tacticalUpdateService?.moveZ === "function"
+      ? await move(document, this.scene, delta, snapshot)
+      : typeof this.tacticalUpdateService?.moveVisibleAxes === "function"
       ? await move(document, this.scene, definition.visibleAxes, delta, snapshot)
       : await move(document, this.scene, delta, snapshot);
     this.onActionResult?.(result, token);
@@ -415,13 +555,33 @@ export class PanelInputController {
     if (!document || typeof this.tacticalUpdateService?.captureInteractionSnapshot !== "function") {
       return null;
     }
-    const normalizedDelta = Object.fromEntries(definition.visibleAxes.map((axis) => [
+    const movementAxes = definition.visibleAxes.includes("z") || delta?.z === undefined
+      ? definition.visibleAxes
+      : [...definition.visibleAxes, "z"];
+    const normalizedDelta = Object.fromEntries(movementAxes.map((axis) => [
       axis,
       Number.isInteger(delta?.[axis]) ? delta[axis] : 0
     ]));
     if (Object.values(normalizedDelta).every((value) => value === 0)) return null;
+    const model = this.currentModel();
+    let current = selected;
+    if (model?.grid && typeof this.coordinateAdapter?.toTactical === "function") {
+      try {
+        current = this.coordinateAdapter.toTactical(document, this.scene);
+      } catch {
+        // Custom callers may provide a render grid without a Foundry grid.
+        // In that case the update service remains the authority for movement.
+      }
+    }
     const snapshot = this.tacticalUpdateService.captureInteractionSnapshot(document);
-    return this.commitMovementDelta(normalizedDelta, {
+    const boundedDelta = this.clampMovementDelta(
+      normalizedDelta,
+      selected,
+      current,
+      model
+    );
+    if (Object.values(boundedDelta).every((value) => value === 0)) return null;
+    return this.commitMovementDelta(boundedDelta, {
       document,
       token: selected,
       snapshot,
@@ -440,51 +600,83 @@ export class PanelInputController {
       return axisDelta(definition.horizontal.axis, definition.horizontal.sign);
     }
     if (key === "ArrowUp") {
-      return axisDelta(definition.vertical.axis, definition.vertical.sign);
-    }
-    if (key === "ArrowDown") {
       return axisDelta(definition.vertical.axis, -definition.vertical.sign);
     }
-    if (key === "PageUp" && definition.visibleAxes.includes("z")) return { z: 1 };
-    if (key === "PageDown" && definition.visibleAxes.includes("z")) return { z: -1 };
+    if (key === "ArrowDown") {
+      return axisDelta(definition.vertical.axis, definition.vertical.sign);
+    }
+    if (key === "PageUp") return { z: 1 };
+    if (key === "PageDown") return { z: -1 };
     return null;
   }
 
   async handleKeyDown(event) {
     if (editableTarget(event?.target)) return false;
     const key = event?.key;
+    if (["Delete", "Backspace"].includes(key)) {
+      if (typeof this.onDeleteToken !== "function") return false;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      return this.enqueueAction(async () => {
+        const result = await this.onDeleteToken();
+        return result !== null;
+      });
+    }
     if (["[", "]"].includes(key)) {
       if (typeof this.onHeadingDelta !== "function") return false;
       event.preventDefault?.();
-      await this.onHeadingDelta(key === "[" ? -45 : 45);
-      return true;
+      event.stopPropagation?.();
+      return this.enqueueAction(async () => {
+        await this.onHeadingDelta(key === "[" ? -45 : 45);
+        return true;
+      });
     }
     if ([",", "."].includes(key)) {
       if (typeof this.onPitchDelta !== "function") return false;
       event.preventDefault?.();
-      await this.onPitchDelta(key === "," ? -1 : 1);
-      return true;
+      event.stopPropagation?.();
+      return this.enqueueAction(async () => {
+        await this.onPitchDelta(key === "," ? -1 : 1);
+        return true;
+      });
     }
     const delta = this.keyboardDelta(key);
     if (!delta) return false;
-    const result = await this.moveByKeyboard(delta);
-    if (result === null) return false;
+    // Consume the browser/Foundry navigation event before awaiting the
+    // authoritative update. Horizontal arrows otherwise get handled by a
+    // parent application while the update promise is in flight.
     event.preventDefault?.();
-    return true;
+    event.stopPropagation?.();
+    return this.enqueueAction(async () => {
+      const result = await this.moveByKeyboard(delta);
+      return result !== null;
+    });
   }
 
   handlePointerDown(event) {
-    if (event?.button !== undefined && event.button !== 0) return false;
+    const button = event?.button ?? 0;
+    if (![0, 2].includes(button)) return false;
     if (this.pointerId !== undefined) return false;
     const local = localPoint(this.element, event);
-    const token = this.projectedTokenAt(local);
+    this.element?.focus?.();
     this.pointerId = event?.pointerId;
+    this.pointerButton = button;
+    this.pointerToken = undefined;
     this.pointerStart = local;
     this.pointerLast = local;
     this.pointerMoved = false;
-    this.startTokenDrag(local, token);
+    this.setSelectionBox(null, null);
+    // Select immediately so a left click cannot be swallowed by the token
+    // movement setup that follows. A subsequent drag still commits movement.
+    const token = button === 0 ? this.projectedTokenAt(local) : null;
+    if (token) {
+      this.pointerToken = token;
+      this.selectAt(local);
+    }
+    if (button === 0) this.startTokenDrag(local, token);
     this.element?.setPointerCapture?.(this.pointerId);
     event?.preventDefault?.();
+    event?.stopPropagation?.();
     return true;
   }
 
@@ -503,8 +695,11 @@ export class PanelInputController {
     };
     this.pointerLast = local;
     if (this.dragToken) this.previewTokenAt(local);
-    else this.panBy(delta);
+    else if (this.pointerButton === 2 || typeof this.onSelectionBoxChanged !== "function") {
+      this.panBy(delta);
+    } else this.setSelectionBox(this.pointerStart, local);
     event?.preventDefault?.();
+    event?.stopPropagation?.();
     return true;
   }
 
@@ -512,16 +707,32 @@ export class PanelInputController {
     if (!samePointer(event, this.pointerId)) return false;
     const local = localPoint(this.element, event);
     const moved = this.pointerMoved;
+    const button = this.pointerButton;
+    const pointerToken = this.pointerToken;
     const draggingToken = this.dragToken !== undefined;
+    const selectionBox = this.selectionBox;
+    // Pointerup is not guaranteed to be preceded by a final pointermove.
+    // Recompute the snapped destination from the release point so the commit
+    // cannot use a stale preview from an earlier grid cell.
+    if (draggingToken && moved) this.previewTokenAt(local);
     this.releasePointer();
     if (draggingToken) {
-      if (moved) await this.commitTokenDrag();
+      if (moved) await this.enqueueAction(() => this.commitTokenDrag());
       else {
         this.clearDragState();
         this.setMovementPreview(null);
       }
-    } else if (!moved) this.selectAt(local);
+    } else if (button === 0 && moved && selectionBox) {
+      const selected = getProjectedTokensInSelectionBox(
+        selectionBox,
+        this.currentModel().tokens
+      );
+      this.onSelectionChanged?.(selected[0]?.tokenId ?? null, selected[0] ?? null);
+      this.requestRender?.({ type: "selection", tokenId: selected[0]?.tokenId ?? null });
+    } else if (button === 0 && !moved && !pointerToken) this.selectAt(local);
+    this.setSelectionBox(null, null);
     event?.preventDefault?.();
+    event?.stopPropagation?.();
     return true;
   }
 
@@ -530,14 +741,24 @@ export class PanelInputController {
     this.cancelPointer();
     this.clearDragState();
     this.setMovementPreview(null);
+    this.setSelectionBox(null, null);
+    event?.stopPropagation?.();
+    return true;
+  }
+
+  handleContextMenu(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
     return true;
   }
 
   handleWheel(event) {
-    const local = localPoint(this.element, event);
     const factor = finiteOr(event?.deltaY, 0) < 0 ? this.zoomStep : 1 / this.zoomStep;
-    this.zoomAt(local, factor);
+    // Wheel zoom changes scale around the current camera focus, so the grid
+    // stays in place instead of shifting toward the pointer.
+    this.setZoom(this.currentCamera().scale * factor);
     event?.preventDefault?.();
+    event?.stopPropagation?.();
     return true;
   }
 
@@ -549,6 +770,8 @@ export class PanelInputController {
     this.pointerStart = undefined;
     this.pointerLast = undefined;
     this.pointerMoved = false;
+    this.pointerButton = undefined;
+    this.pointerToken = undefined;
   }
 
   cancelPointer() {
@@ -558,7 +781,7 @@ export class PanelInputController {
   panBy(delta) {
     const camera = this.currentCamera();
     if (!camera.view) return false;
-    if (camera.view.startsWith("iso-")) {
+    if (isometricView(camera.view)) {
       const currentPan = this.panel.pan ?? { x: 0, y: 0 };
       const pan = {
         x: finiteOr(currentPan.x, 0) + finiteOr(delta?.x, 0),
@@ -589,7 +812,7 @@ export class PanelInputController {
   zoomAt(screenPoint, factor) {
     const camera = this.currentCamera();
     if (!camera.view) return camera.scale;
-    if (camera.view.startsWith("iso-")) {
+    if (isometricView(camera.view)) {
       const zoom = clampLogicalZoom(camera.scale * finiteOr(factor, 1));
       this.panel.zoom = zoom;
       this.notifyViewChanged({ type: "zoom", zoom });

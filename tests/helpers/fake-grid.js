@@ -27,24 +27,24 @@ export function createFakeSquareGrid({
     getOffset(coords) {
       calls.getOffset.push(coords);
       return {
-        i: Math.floor((coords.x - originX) / size),
-        j: Math.floor((coords.y - originY) / size)
+        i: Math.floor((coords.y - originY) / size),
+        j: Math.floor((coords.x - originX) / size)
       };
     },
 
     getCenterPoint(coords) {
       calls.getCenterPoint.push(coords);
       return {
-        x: originX + (coords.i + 0.5) * size,
-        y: originY + (coords.j + 0.5) * size
+        x: originX + (coords.j + 0.5) * size,
+        y: originY + (coords.i + 0.5) * size
       };
     },
 
     getTopLeftPoint(coords) {
       calls.getTopLeftPoint.push(coords);
       return {
-        x: originX + coords.i * size,
-        y: originY + coords.j * size
+        x: originX + coords.j * size,
+        y: originY + coords.i * size
       };
     },
 

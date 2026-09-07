@@ -6,19 +6,17 @@ import {
 } from "../../scripts/view-registry.js";
 
 describe("fixed tactical view registry", () => {
-  it("contains exactly the nine declared views in order", () => {
+  it("contains exactly the seven declared views in order", () => {
     expect(VIEW_REGISTRY.list()).toEqual([
       { id: "top", name: "Top" },
-      { id: "north", name: "North" },
-      { id: "south", name: "South" },
-      { id: "east", name: "East" },
-      { id: "west", name: "West" },
-      { id: "iso-ne", name: "Isometric NE" },
-      { id: "iso-se", name: "Isometric SE" },
-      { id: "iso-sw", name: "Isometric SW" },
-      { id: "iso-nw", name: "Isometric NW" }
+      { id: "bottom", name: "Bottom" },
+      { id: "left", name: "Left" },
+      { id: "right", name: "Right" },
+      { id: "front", name: "Front" },
+      { id: "back", name: "Back" },
+      { id: "isometric", name: "Isometric" }
     ]);
-    expect(VIEW_REGISTRY.size).toBe(9);
+    expect(VIEW_REGISTRY.size).toBe(7);
   });
 
   it("has unique IDs and no public mutators", () => {
@@ -41,9 +39,9 @@ describe("fixed tactical view registry", () => {
   });
 
   it("returns the registered view by ID", () => {
-    expect(VIEW_REGISTRY.get("iso-ne")).toEqual({
-      id: "iso-ne",
-      name: "Isometric NE"
+    expect(VIEW_REGISTRY.get("isometric")).toEqual({
+      id: "isometric",
+      name: "Isometric"
     });
     expect(VIEW_REGISTRY.get("missing")).toBeUndefined();
   });

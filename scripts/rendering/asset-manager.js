@@ -1,4 +1,9 @@
-import { MODULE_ID, VIEW_DEFINITIONS } from "../constants.js";
+import {
+  canonicalViewId,
+  MODULE_ID,
+  VIEW_DEFINITIONS,
+  VIEW_ID_ALIASES
+} from "../constants.js";
 
 /** Module-owned static tactical artwork. These are references, not executable data. */
 export const GENERIC_ASSET_PATHS = Object.freeze({
@@ -28,10 +33,10 @@ const PRESET_ALIASES = Object.freeze({
 
 const VIEW_IDS = new Set(VIEW_DEFINITIONS.map(({ id }) => id));
 const MIRROR_PAIRS = Object.freeze({
-  north: Object.freeze({ opposite: "south", enabledBy: "northSouth" }),
-  south: Object.freeze({ opposite: "north", enabledBy: "northSouth" }),
-  east: Object.freeze({ opposite: "west", enabledBy: "eastWest" }),
-  west: Object.freeze({ opposite: "east", enabledBy: "eastWest" })
+  front: Object.freeze({ opposite: "back", enabledBy: "northSouth" }),
+  back: Object.freeze({ opposite: "front", enabledBy: "northSouth" }),
+  right: Object.freeze({ opposite: "left", enabledBy: "eastWest" }),
+  left: Object.freeze({ opposite: "right", enabledBy: "eastWest" })
 });
 
 function normalizedPreset(preset) {
@@ -73,11 +78,37 @@ function addCandidate(candidates, seen, source, mirrored, level) {
 export function getTacticalArtCandidates(value, view) {
   const art = artConfig(value);
   const candidates = [];
+  const legacyView = Object.hasOwn(VIEW_ID_ALIASES, view);
   const seen = new Set();
-  const exact = VIEW_IDS.has(view) ? art.views[view] : "";
+  if (legacyView) {
+    addCandidate(candidates, seen, art.views[view], false, "view");
+    const legacyMirror = {
+      north: { opposite: "south", enabledBy: "northSouth" },
+      south: { opposite: "north", enabledBy: "northSouth" },
+      east: { opposite: "west", enabledBy: "eastWest" },
+      west: { opposite: "east", enabledBy: "eastWest" }
+    }[view];
+    if (legacyMirror?.enabledBy && art.mirror[legacyMirror.enabledBy] === true) {
+      addCandidate(
+        candidates,
+        seen,
+        art.views[legacyMirror.opposite],
+        true,
+        "mirrored-view"
+      );
+    }
+  }
+  const canonical = canonicalViewId(view);
+  const exact = legacyView ? "" : VIEW_IDS.has(canonical) ? art.views[canonical] : "";
   addCandidate(candidates, seen, exact, false, "view");
 
-  const mirror = MIRROR_PAIRS[view];
+  // Read art saved with the former compass/diagonal IDs after the view
+  // vocabulary was reduced to the seven canonical views.
+  if (!legacyView) for (const [legacy, target] of Object.entries(VIEW_ID_ALIASES)) {
+    if (target === canonical) addCandidate(candidates, seen, art.views[legacy], false, "legacy-view");
+  }
+
+  const mirror = MIRROR_PAIRS[canonical];
   if (mirror?.enabledBy && art.mirror[mirror.enabledBy] === true) {
     addCandidate(candidates, seen, art.views[mirror.opposite], true, "mirrored-view");
   }

@@ -79,6 +79,11 @@ function pointFromGrid(methodName, value) {
   return value;
 }
 
+function clampToFootprint(value, minimum, maximum) {
+  if (maximum < minimum) return (minimum + maximum) / 2;
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
 /**
  * Error raised when a Scene cannot provide a safe square-grid coordinate
  * conversion. The eligibility result is retained for diagnostics/UI callers.
@@ -228,8 +233,8 @@ export class CoordinateAdapter {
       x: origin.x + width - EPSILON,
       y: origin.y + height - EPSILON
     });
-    const columns = Math.max(1, Math.floor(endOffset.i) + 1);
-    const rows = Math.max(1, Math.floor(endOffset.j) + 1);
+    const columns = Math.max(1, Math.floor(endOffset.j) + 1);
+    const rows = Math.max(1, Math.floor(endOffset.i) + 1);
 
     return Object.freeze({
       columns,
@@ -268,7 +273,10 @@ export class CoordinateAdapter {
    * No pixel origin is inferred here: the returned point comes from the
    * Foundry grid's public getTopLeftPoint method.
    */
-  toTokenPosition(token, scene, tacticalAnchor, { grid: explicitGrid } = {}) {
+  toTokenPosition(token, scene, tacticalAnchor, {
+    grid: explicitGrid,
+    clampToGrid = false
+  } = {}) {
     const { grid } = this.context(scene, explicitGrid);
     const data = tokenData(token);
     const x = tacticalAnchor?.x;
@@ -277,9 +285,17 @@ export class CoordinateAdapter {
       throw new TypeError("A tactical anchor with finite x and y is required");
     }
 
+    const bounds = clampToGrid ? this.getTopGrid(scene, { grid }) : null;
+    const boundedX = bounds
+      ? clampToFootprint(x, data.width / 2, bounds.columns - data.width / 2)
+      : x;
+    const boundedY = bounds
+      ? clampToFootprint(y, data.height / 2, bounds.rows - data.height / 2)
+      : y;
     const topLeftOffset = {
-      i: integerOffset(x - data.width / 2),
-      j: integerOffset(y - data.height / 2)
+      // Foundry GridOffset uses i for row (Y) and j for column (X).
+      i: integerOffset(boundedY - data.height / 2),
+      j: integerOffset(boundedX - data.width / 2)
     };
     const point = pointFromGrid(
       "getTopLeftPoint",
@@ -326,7 +342,15 @@ export class CoordinateAdapter {
       y: firstCellCenter.y + (tacticalAnchor.y - 0.5) * sizeY
         - data.height * sizeY / 2
     };
-    const position = this.snapTokenPosition(token, scene, candidateTopLeft, { grid });
+    const snappedPoint = this.snapTokenPosition(token, scene, candidateTopLeft, { grid });
+    const snappedAnchor = {
+      x: (snappedPoint.x + data.width * sizeX / 2 - firstCellCenter.x) / sizeX + 0.5,
+      y: (snappedPoint.y + data.height * sizeY / 2 - firstCellCenter.y) / sizeY + 0.5
+    };
+    const position = this.toTokenPosition(token, scene, snappedAnchor, {
+      grid,
+      clampToGrid: true
+    });
     return Object.freeze({
       position,
       tacticalX: (position.x + data.width * sizeX / 2 - firstCellCenter.x) / sizeX + 0.5,
@@ -346,7 +370,7 @@ export class CoordinateAdapter {
       token,
       scene,
       { x: current.tacticalX + dx, y: current.tacticalY + dy },
-      { grid: explicitGrid }
+      { grid: explicitGrid, clampToGrid: true }
     );
   }
 }

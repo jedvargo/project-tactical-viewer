@@ -23,12 +23,26 @@ export const TACTICAL_AXES = TACTICAL_AXIS_CONVENTION;
 
 export const VIEW_DEFINITIONS = Object.freeze([
   Object.freeze({ id: "top", name: "Top" }),
-  Object.freeze({ id: "north", name: "North" }),
-  Object.freeze({ id: "south", name: "South" }),
-  Object.freeze({ id: "east", name: "East" }),
-  Object.freeze({ id: "west", name: "West" }),
-  Object.freeze({ id: "iso-ne", name: "Isometric NE" }),
-  Object.freeze({ id: "iso-se", name: "Isometric SE" }),
-  Object.freeze({ id: "iso-sw", name: "Isometric SW" }),
-  Object.freeze({ id: "iso-nw", name: "Isometric NW" })
+  Object.freeze({ id: "bottom", name: "Bottom" }),
+  Object.freeze({ id: "left", name: "Left" }),
+  Object.freeze({ id: "right", name: "Right" }),
+  Object.freeze({ id: "front", name: "Front" }),
+  Object.freeze({ id: "back", name: "Back" }),
+  Object.freeze({ id: "isometric", name: "Isometric" })
 ]);
+
+/** IDs used by the original compass-based view vocabulary. */
+export const VIEW_ID_ALIASES = Object.freeze({
+  north: "front",
+  south: "back",
+  east: "right",
+  west: "left",
+  "iso-ne": "isometric",
+  "iso-se": "isometric",
+  "iso-sw": "isometric",
+  "iso-nw": "isometric"
+});
+
+export function canonicalViewId(view) {
+  return VIEW_ID_ALIASES[view] ?? view;
+}

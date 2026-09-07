@@ -128,7 +128,7 @@ describe("Prompt 18 orthographic render models", () => {
 
     expect(model.view).toBe(view);
     expect(model.tokens).toHaveLength(1);
-    expect(model.tokens[0].point).toEqual({ x: 250, y: 200 });
+    expect(model.tokens[0].point).toEqual({ x: 250, y: 150 });
     expect(Number.isFinite(model.tokens[0].orientation.x)).toBe(true);
     expect(Number.isFinite(model.tokens[0].orientation.y)).toBe(true);
   });
@@ -184,12 +184,12 @@ describe("Prompt 18 projection-driven side input", () => {
     ["east", 100, 200, { y: -1, z: 0 }],
     ["west", 100, 200, { y: 1, z: 0 }],
     ["west", 300, 200, { y: -1, z: 0 }],
-    ["south", 200, 300, { x: 0, z: 1 }],
-    ["south", 200, 100, { x: 0, z: -1 }],
-    ["east", 200, 300, { y: 0, z: 1 }],
-    ["east", 200, 100, { y: 0, z: -1 }],
-    ["west", 200, 300, { y: 0, z: 1 }],
-    ["west", 200, 100, { y: 0, z: -1 }]
+    ["south", 200, 300, { x: 0, z: -1 }],
+    ["south", 200, 100, { x: 0, z: 1 }],
+    ["east", 200, 300, { y: 0, z: -1 }],
+    ["east", 200, 100, { y: 0, z: 1 }],
+    ["west", 200, 300, { y: 0, z: -1 }],
+    ["west", 200, 100, { y: 0, z: 1 }]
   ])("moves the visible %s axis in the projected screen direction", async (view, endX, endY, delta) => {
     const { controller, service, visibleAxes } = makeSideController(view);
 
@@ -213,6 +213,6 @@ describe("Prompt 18 projection-driven side input", () => {
 
     expect(service.moveVisibleAxes).toHaveBeenCalledTimes(1);
     expect(service.moveVisibleAxes.mock.calls[0][2]).toEqual(["y", "z"]);
-    expect(service.moveVisibleAxes.mock.calls[0][3]).toEqual({ y: 1, z: 1 });
+    expect(service.moveVisibleAxes.mock.calls[0][3]).toEqual({ y: 1, z: -1 });
   });
 });

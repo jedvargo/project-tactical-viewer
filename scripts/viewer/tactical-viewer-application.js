@@ -1,4 +1,4 @@
-import { ALLOWED_PITCHES, MODULE_ID } from "../constants.js";
+import { ALLOWED_PITCHES, canonicalViewId, MODULE_ID } from "../constants.js";
 import { ProjectionEngine } from "../projection/projection-engine.js";
 import { isRenderableView } from "../rendering/canvas-renderer.js";
 import { VIEW_REGISTRY } from "../view-registry.js";
@@ -15,18 +15,23 @@ import {
 import {
   DEFAULT_DISPLAY_MODE,
   DEFAULT_GRID_OPACITY,
+  DEFAULT_GRID_STYLE,
   DEFAULT_OVERLAYS,
   DISPLAY_MODES,
+  GRID_LINE_STYLES,
   normalizeDisplayMode,
   normalizeGridDimensions,
   normalizeBackground,
   normalizeGridOpacity,
+  normalizeGridStyle,
   normalizedOverlays
 } from "../persistence/migrations.js";
 import {
   DEFAULT_LOGICAL_ZOOM,
   PanelInputController
 } from "./panel-input-controller.js";
+import { snapHeading } from "../model/orientation-math.js";
+import { getTokenPitch } from "../model/token-flags.js";
 import { localize, localizeFormat, viewLabel } from "../i18n.js";
 import {
   getViewerDropData,
@@ -96,10 +101,31 @@ function clonePan(pan) {
 }
 
 function isometricView(view) {
-  return typeof view === "string" && view.startsWith("iso-");
+  return view === "isometric"
+    || (typeof view === "string" && view.startsWith("iso-"));
+}
+
+function sameFocus(left, right) {
+  return left && right
+    && left.x === right.x
+    && left.y === right.y
+    && left.z === right.z;
 }
 
 const SIDE_CONTROL_GUTTER = 8;
+const DEFAULT_GRID_DIMENSIONS = Object.freeze({ x: 20, y: 20, z: 20 });
+
+function sceneGridDimensions(scene) {
+  const dimensions = scene?.dimensions ?? {};
+  const grid = scene?.grid ?? {};
+  const sizeX = Number(grid.sizeX ?? grid.size);
+  const sizeY = Number(grid.sizeY ?? grid.size);
+  const columns = Number(dimensions.width) / sizeX;
+  const rows = Number(dimensions.height) / sizeY;
+  return Number.isFinite(columns) && Number.isFinite(rows)
+    ? { x: Math.max(1, Math.round(columns)), y: Math.max(1, Math.round(rows)), z: 10 }
+    : null;
+}
 
 function viewportSize(document) {
   const documentWidth = Number(document?.documentElement?.clientWidth);
@@ -166,11 +192,16 @@ function makeState(scene, persistenceService, registry) {
   const layout = normalizePanelLayout(layoutFor(scene, persistenceService));
   return {
     selectedTokenId: null,
+    selectionBox: null,
     movementPreview: null,
     sharedFocus: null,
     sharedPan: { x: 0, y: 0 },
     sharedZoom: DEFAULT_LOGICAL_ZOOM,
-    gridDimensions: normalizeGridDimensions(layout.gridDimensions),
+    // Keep the rendered tactical grid aligned with the Scene coordinate
+    // adapter unless the user has explicitly saved a viewer grid size.
+    gridDimensions: normalizeGridDimensions(layout.gridDimensions)
+      ?? sceneGridDimensions(scene)
+      ?? { ...DEFAULT_GRID_DIMENSIONS },
     background: normalizeBackground(layout.background),
     displayMode: normalizeDisplayMode(layout.displayMode, DEFAULT_DISPLAY_MODE),
     panelCount: layout.panelCount,
@@ -188,6 +219,7 @@ function makeState(scene, persistenceService, registry) {
       pan: { x: 0, y: 0 },
       // Transient session state is intentionally not read from persistence.
       zoom: DEFAULT_LOGICAL_ZOOM,
+      fitToPanel: true,
       focus: null,
       selectedTokenId: null,
       overlays: normalizedOverlays(panel.overlays)
@@ -325,6 +357,7 @@ export function createTacticalViewerApplicationClass({
       this.overlapChooserPanelIndex = 0;
       this.linkControls = {};
       this.inputControllers = [];
+      this.panelActionQueues = [];
       this.attached = false;
       this.shellElement = undefined;
       this.handleDragOver = this.handleDragOver.bind(this);
@@ -349,17 +382,18 @@ export function createTacticalViewerApplicationClass({
 
       try {
         if (this.viewerState.gridDimensions) {
+          const dimensions = this.viewerState.gridDimensions;
           return {
-            x: (this.viewerState.gridDimensions.x ?? this.viewerState.gridDimensions.columns) / 2,
-            y: (this.viewerState.gridDimensions.y ?? this.viewerState.gridDimensions.rows) / 2,
-            z: 0
+            x: (dimensions.x ?? dimensions.columns) / 2,
+            y: (dimensions.y ?? dimensions.rows) / 2,
+            z: (dimensions.z ?? dimensions.depth ?? 10) / 2
           };
         }
         const grid = this.coordinateAdapter?.getTopGrid?.(this.scene);
         if (grid) return {
           x: grid.columns / 2,
           y: grid.rows / 2,
-          z: 0
+          z: 5
         };
       } catch {
         // A custom/test renderer may not have a Foundry grid; its own camera
@@ -383,9 +417,9 @@ export function createTacticalViewerApplicationClass({
         ...panel,
         focus: this.viewerState.links.center ? this.getSharedFocus() : panel.focus,
         pan: this.viewerState.links.center ? clonePan(this.viewerState.sharedPan) : clonePan(panel.pan),
-        zoom: this.viewerState.links.zoom
-          ? this.viewerState.sharedZoom
-          : panel.zoom
+        zoom: panel.fitToPanel === true
+          ? undefined
+          : (this.viewerState.links.zoom ? this.viewerState.sharedZoom : panel.zoom)
       };
     }
 
@@ -394,6 +428,16 @@ export function createTacticalViewerApplicationClass({
       return this.viewerState.links.selection
         ? this.viewerState.selectedTokenId
         : (panel?.selectedTokenId ?? null);
+    }
+
+    getPanelZoom(index = 0) {
+      const panel = this.viewerState.panels[index] ?? this.viewerState.panels[0];
+      if (!panel) return DEFAULT_LOGICAL_ZOOM;
+      if (panel.fitToPanel === true) {
+        const fitted = this.buildRenderModel(undefined, index)?.camera?.scale;
+        if (Number.isFinite(fitted)) return fitted;
+      }
+      return Number.isFinite(panel.zoom) ? panel.zoom : DEFAULT_LOGICAL_ZOOM;
     }
 
     getVisibleTacticalStates() {
@@ -455,20 +499,45 @@ export function createTacticalViewerApplicationClass({
         const point = this.projectionEngine.inversePoint(local, model.camera, {
           preserve: model.camera.focus
         });
-        const width = Number.isFinite(tokenData.width) && tokenData.width > 0 ? tokenData.width : 1;
-        const height = Number.isFinite(tokenData.height) && tokenData.height > 0 ? tokenData.height : 1;
-        const tacticalAnchor = {
-          x: Math.round(point.x - width / 2) + width / 2,
-          y: Math.round(point.y - height / 2) + height / 2
+        const width = Number.isFinite(tokenData.width) && tokenData.width > 0
+          ? tokenData.width
+          : 1;
+        const height = Number.isFinite(tokenData.height) && tokenData.height > 0
+          ? tokenData.height
+          : 1;
+        const tokenForPosition = { ...tokenData, width, height, x: 0, y: 0 };
+        const grid = model.grid ?? {};
+        const columns = Number(grid.columns);
+        const rows = Number(grid.rows);
+        const depth = Number(grid.depth ?? grid.z);
+        const tokenDepth = Math.max(1, Number(tokenData.depth) || 1);
+        const boundedPoint = {
+          ...point,
+          x: Number.isFinite(columns)
+            ? Math.min(columns - width / 2, Math.max(width / 2, point.x))
+            : point.x,
+          y: Number.isFinite(rows)
+            ? Math.min(rows - height / 2, Math.max(height / 2, point.y))
+            : point.y,
+          z: Number.isFinite(depth)
+            ? Math.min(depth - tokenDepth, Math.max(0, Math.round(Number(point.z) || 0)))
+            : point.z
         };
-        const position = this.coordinateAdapter.toTokenPosition(
-          { ...tokenData, x: 0, y: 0 },
+        const snapped = typeof this.coordinateAdapter.snapTacticalAnchor === "function"
+          ? this.coordinateAdapter.snapTacticalAnchor(tokenForPosition, this.scene, boundedPoint)
+          : null;
+        const position = snapped?.position ?? this.coordinateAdapter.toTokenPosition(
+          tokenForPosition,
           this.scene,
-          tacticalAnchor
+          {
+            x: Math.round(boundedPoint.x - width / 2) + width / 2,
+            y: Math.round(boundedPoint.y - height / 2) + height / 2
+          },
+          { clampToGrid: true }
         );
         tokenData.x = position.x;
         tokenData.y = position.y;
-        tokenData.elevation = this.coordinateAdapter.toElevation(point.z, this.scene);
+        tokenData.elevation = this.coordinateAdapter.toElevation(boundedPoint.z, this.scene);
         tokenData.flags = {
           ...(tokenData.flags ?? {}),
           [MODULE_ID]: { ...(tokenData.flags?.[MODULE_ID] ?? {}), enabled: true }
@@ -548,6 +617,9 @@ export function createTacticalViewerApplicationClass({
         panelIndex,
         panel: this.getPanelRenderState(panelIndex),
         selectedTokenId: this.getSelectedTokenId(panelIndex),
+        selectionBox: this.viewerState.selectionBox?.panelIndex === panelIndex
+          ? this.viewerState.selectionBox
+          : null,
         devicePixelRatio: this.devicePixelRatio,
         visibleTacticalStates,
         gridDimensions: this.viewerState.gridDimensions,
@@ -559,17 +631,20 @@ export function createTacticalViewerApplicationClass({
       this.panelElements.forEach((panelElement, index) => {
         const label = panelElement.querySelector?.('[data-role="zoom-label"]');
         const panel = this.getPanelRenderState(index);
-        if (label && panel) label.textContent = localizeFormat(
+        if (!label || !panel) return;
+        const zoom = this.getPanelZoom(index);
+        label.textContent = localizeFormat(
           "viewer.zoomLabel",
-          `${Math.round(panel.zoom)} px/cell`,
-          { zoom: Math.round(panel.zoom) }
+          `${Math.round(zoom)} px/cell`,
+          { zoom: Math.round(zoom) }
         );
       });
       if (this.zoomLabel && !this.panelElements.length) {
+        const zoom = this.getPanelZoom(0);
         this.zoomLabel.textContent = localizeFormat(
           "viewer.zoomLabel",
-          `${Math.round(this.viewerState.panels[0].zoom)} px/cell`,
-          { zoom: Math.round(this.viewerState.panels[0].zoom) }
+          `${Math.round(zoom)} px/cell`,
+          { zoom: Math.round(zoom) }
         );
       }
     }
@@ -617,6 +692,16 @@ export function createTacticalViewerApplicationClass({
       this.requestRender({
         type: "selection",
         tokenId: tokenId ?? null,
+        panelIndex
+      });
+    }
+
+    handleSelectionBoxChanged(selectionBox, panelIndex = 0) {
+      this.viewerState.selectionBox = selectionBox
+        ? { ...selectionBox, panelIndex }
+        : null;
+      this.requestRender({
+        type: selectionBox ? "selection-box" : "selection-box-cleared",
         panelIndex
       });
     }
@@ -739,12 +824,17 @@ export function createTacticalViewerApplicationClass({
 
     async setLinkZoom(enabled) {
       this.viewerState.links.zoom = enabled === true;
-      const zoom = Number.isFinite(this.viewerState.panels[0]?.zoom)
-        ? this.viewerState.panels[0].zoom
-        : this.viewerState.sharedZoom;
+      const zoom = this.viewerState.links.zoom
+        ? this.getPanelZoom(0)
+        : (Number.isFinite(this.viewerState.panels[0]?.zoom)
+          ? this.viewerState.panels[0].zoom
+          : this.viewerState.sharedZoom);
       this.viewerState.sharedZoom = zoom;
       if (this.viewerState.links.zoom) {
-        this.viewerState.panels.forEach((panel) => { panel.zoom = zoom; });
+        this.viewerState.panels.forEach((panel) => {
+          panel.zoom = zoom;
+          panel.fitToPanel = false;
+        });
       }
       this.updateLinkControls();
       this.updateZoomLabel();
@@ -792,15 +882,23 @@ export function createTacticalViewerApplicationClass({
 
       if (change.type === "zoom" && Number.isFinite(change.zoom)) {
         panel.zoom = change.zoom;
+        panel.fitToPanel = false;
         if (this.viewerState.links.zoom) {
           this.viewerState.sharedZoom = change.zoom;
-          this.viewerState.panels.forEach((entry) => { entry.zoom = change.zoom; });
+          this.viewerState.panels.forEach((entry) => {
+            entry.zoom = change.zoom;
+            entry.fitToPanel = false;
+          });
         }
       } else if (change.type === "reset-view") {
         panel.zoom = DEFAULT_LOGICAL_ZOOM;
+        panel.fitToPanel = false;
         if (this.viewerState.links.zoom) {
           this.viewerState.sharedZoom = DEFAULT_LOGICAL_ZOOM;
-          this.viewerState.panels.forEach((entry) => { entry.zoom = DEFAULT_LOGICAL_ZOOM; });
+          this.viewerState.panels.forEach((entry) => {
+            entry.zoom = DEFAULT_LOGICAL_ZOOM;
+            entry.fitToPanel = false;
+          });
         }
       }
       this.updateZoomLabel();
@@ -827,18 +925,20 @@ export function createTacticalViewerApplicationClass({
       if (!Number.isInteger(index) || index < 0 || index >= this.viewerState.panels.length) {
         return false;
       }
-      if (!this.viewRegistry.has(view) || !isRenderableView(view)) return false;
-      this.viewerState.panels[index].view = view;
+      const canonical = canonicalViewId(view);
+      if (!this.viewRegistry.has(canonical) || !isRenderableView(canonical)) return false;
+      this.viewerState.panels[index].view = canonical;
       await this.persistLayout();
       this.updatePanelControls(index);
       this.updateInteractionControls();
-      this.requestRender({ type: "view-change", panelIndex: index, view });
+      this.requestRender({ type: "view-change", panelIndex: index, view: canonical });
       return true;
     }
 
     async setPanelOverlay(index, key, enabled) {
       const panel = this.viewerState.panels[index];
-      if (!panel || !Object.hasOwn(DEFAULT_OVERLAYS, key) || key === "gridOpacity") return false;
+      if (!panel || !Object.hasOwn(DEFAULT_OVERLAYS, key)
+        || key === "gridOpacity" || key === "gridStyle") return false;
       panel.overlays[key] = enabled === true;
       await this.persistLayout();
       this.requestRender({ type: "overlay-change", panelIndex: index, key });
@@ -858,16 +958,20 @@ export function createTacticalViewerApplicationClass({
       return panel.overlays.gridOpacity;
     }
 
+    async setPanelGridStyle(index, value) {
+      const panel = this.viewerState.panels[index];
+      if (!panel) return false;
+      panel.overlays.gridStyle = normalizeGridStyle(value);
+      const control = this.panelElements[index]?.querySelector?.('[data-role="grid-style"]');
+      if (control) control.value = panel.overlays.gridStyle;
+      await this.persistLayout();
+      this.renderer?.invalidate?.({ type: "scene-update" });
+      this.requestRender({ type: "grid-style-change", panelIndex: index });
+      return panel.overlays.gridStyle;
+    }
+
     sceneGridDimensions() {
-      const dimensions = this.scene?.dimensions ?? {};
-      const grid = this.scene?.grid ?? {};
-      const sizeX = Number(grid.sizeX ?? grid.size);
-      const sizeY = Number(grid.sizeY ?? grid.size);
-      const columns = Number(dimensions.width) / sizeX;
-      const rows = Number(dimensions.height) / sizeY;
-      return Number.isFinite(columns) && Number.isFinite(rows)
-        ? { x: Math.max(1, Math.round(columns)), y: Math.max(1, Math.round(rows)), z: 10 }
-        : null;
+      return sceneGridDimensions(this.scene);
     }
 
     updateGridDimensionControls() {
@@ -878,10 +982,25 @@ export function createTacticalViewerApplicationClass({
       }
     }
 
-    async setGridDimensions(x, y, z = this.viewerState.gridDimensions?.z ?? 10) {
+    async setGridDimensions(x, y, z = 10) {
+      const previous = this.viewerState.gridDimensions;
       const normalized = normalizeGridDimensions({ x: Number(x), y: Number(y), z: Number(z) });
       if (!normalized) return false;
       this.viewerState.gridDimensions = normalized;
+      const previousCenter = previous && {
+        x: (previous.x ?? previous.columns) / 2,
+        y: (previous.y ?? previous.rows) / 2,
+        z: (previous.z ?? previous.depth ?? 10) / 2
+      };
+      const nextCenter = {
+        x: normalized.x / 2,
+        y: normalized.y / 2,
+        z: normalized.z / 2
+      };
+      if (sameFocus(this.viewerState.sharedFocus, previousCenter)) {
+        this.viewerState.sharedFocus = nextCenter;
+        this.viewerState.panels.forEach((panel) => { panel.focus = { ...nextCenter }; });
+      }
       this.updateGridDimensionControls();
       await this.persistLayout();
       this.renderer?.invalidate?.({ type: "scene-update" });
@@ -1014,6 +1133,8 @@ export function createTacticalViewerApplicationClass({
       if (!panelElement || !panel) return;
       const select = panelElement.querySelector?.('[data-role="view-select"]');
       if (select) select.value = panel.view;
+      const gridStyle = panelElement.querySelector?.('[data-role="grid-style"]');
+      if (gridStyle) gridStyle.value = panel.overlays.gridStyle ?? DEFAULT_GRID_STYLE;
       const canvas = this.canvases[index];
       const readOnly = isometricView(panel.view);
       if (canvas) {
@@ -1021,14 +1142,14 @@ export function createTacticalViewerApplicationClass({
         canvas.setAttribute?.(
           "aria-description",
           readOnly
-            ? localize("viewer.interaction.isoDescription", "Isometric view is read-only for token movement; dragging pans the view.")
-            : localize("viewer.interaction.orthographicDescription", "Dragging a visible token moves it on this projection's axes.")
+          ? localize("viewer.interaction.isoDescription", "Isometric view is read-only for token movement; dragging pans the view.")
+            : localize("viewer.interaction.orthographicDescription", "Left click selects; left-drag selects a box; right-drag pans the view. Dragging a token moves it.")
         );
         canvas.title = readOnly
-          ? localize("viewer.interaction.isoTitle", "Read-only isometric view: drag to pan; move tokens from an orthographic view.")
-          : localize("viewer.interaction.orthographicTitle", "Drag to pan or move a visible token.");
+          ? localize("viewer.interaction.isoTitle", "Left click selects; left-drag selects a box; right-drag pans the view.")
+          : localize("viewer.interaction.orthographicTitle", "Left click selects; left-drag selects a box; right-drag pans the view. Dragging a token moves it.");
       }
-      for (const key of Object.keys(DEFAULT_OVERLAYS).filter((key) => key !== "gridOpacity")) {
+      for (const key of Object.keys(DEFAULT_OVERLAYS).filter((key) => !["gridOpacity", "gridStyle"].includes(key))) {
         const checkbox = panelElement.querySelector?.(`[data-role="overlay-${key}"]`);
         if (checkbox) checkbox.checked = panel.overlays[key] === true;
       }
@@ -1069,26 +1190,31 @@ export function createTacticalViewerApplicationClass({
         const movementDisabled = isometricView(panel.view)
           || selected?.visibleToCurrentUser !== true
           || selected?.canCurrentUserMove !== true;
-        const definition = this.projectionEngine.describe(panel.view);
         for (const role of ["move-left", "move-right", "move-up", "move-down"]) {
           const control = panelElement.querySelector?.(`[data-role="${role}"]`);
           if (control) control.disabled = movementDisabled;
         }
         for (const role of ["z-decrease", "z-increase"]) {
           const control = panelElement.querySelector?.(`[data-role="${role}"]`);
-          if (control) control.disabled = movementDisabled || !definition.visibleAxes?.includes("z");
+          if (control) control.disabled = movementDisabled;
         }
         for (const role of ["heading-decrease", "heading-increase"]) {
           const control = panelElement.querySelector?.(`[data-role="${role}"]`);
           if (control) control.disabled = selected?.visibleToCurrentUser !== true
             || selected?.canCurrentUserRotate !== true;
         }
-        const pitchDisabled = !["north", "south", "east", "west"].includes(panel.view)
+        const pitchDisabled = isometricView(panel.view)
           || selected?.visibleToCurrentUser !== true
           || selected?.canCurrentUserRotate !== true;
         for (const role of ["pitch-previous", "pitch-next"]) {
           const control = panelElement.querySelector?.(`[data-role="${role}"]`);
           if (control) control.disabled = pitchDisabled;
+        }
+        const deleteControl = panelElement.querySelector?.('[data-role="delete-token"]');
+        if (deleteControl) {
+          const canDelete = selected?.canCurrentUserDelete
+            ?? selected?.canCurrentUserUpdate === true;
+          deleteControl.disabled = selected?.visibleToCurrentUser !== true || !canDelete;
         }
         const sizeDisabled = selected?.visibleToCurrentUser !== true
           || selected?.canCurrentUserUpdate !== true;
@@ -1113,7 +1239,47 @@ export function createTacticalViewerApplicationClass({
       this.requestRender({ type: "tactical-action-result", status: result?.status });
     }
 
-    async setHeadingBy(delta, panelIndex = 0) {
+    enqueuePanelAction(panelIndex, action) {
+      const queue = this.panelActionQueues[panelIndex] ?? {
+        busy: false,
+        tail: Promise.resolve()
+      };
+      this.panelActionQueues[panelIndex] = queue;
+      if (!queue.busy) {
+        queue.busy = true;
+        let result;
+        try {
+          result = action();
+        } catch (error) {
+          result = Promise.reject(error);
+        }
+        const current = Promise.resolve(result);
+        queue.tail = current;
+        current.then(
+          () => { if (queue.tail === current) queue.busy = false; },
+          () => { if (queue.tail === current) queue.busy = false; }
+        );
+        return current;
+      }
+      const queued = queue.tail.then(action, action);
+      queue.tail = queued;
+      queued.then(
+        () => { if (queue.tail === queued) queue.busy = false; },
+        () => { if (queue.tail === queued) queue.busy = false; }
+      );
+      return queued;
+    }
+
+    setHeadingBy(delta, panelIndex = 0) {
+      const controller = this.inputControllers[panelIndex];
+      if (controller) {
+        return controller.enqueueAction(() => this.commitHeadingBy(delta, panelIndex));
+      }
+      return this.enqueuePanelAction(panelIndex,
+        () => this.commitHeadingBy(delta, panelIndex));
+    }
+
+    async commitHeadingBy(delta, panelIndex = 0) {
       const selected = this.getSelectedTacticalState(panelIndex);
       const document = selected ? this.getTokenById(selected.tokenId) : null;
       if (!selected || selected.visibleToCurrentUser !== true
@@ -1122,9 +1288,14 @@ export function createTacticalViewerApplicationClass({
         return null;
       }
       const snapshot = this.tacticalUpdateService.captureInteractionSnapshot(document);
+      const orientationAdapter = this.tacticalUpdateService.orientationAdapter;
+      const documentHeading = Number.isFinite(Number(document.rotation))
+        && typeof orientationAdapter?.foundryRotationToHeading === "function"
+        ? orientationAdapter.foundryRotationToHeading(Number(document.rotation))
+        : selected.heading;
       const result = await this.tacticalUpdateService.setHeading(
         document,
-        selected.heading + delta,
+        snapHeading(documentHeading) + delta,
         snapshot
       );
       this.handleActionResult(result);
@@ -1145,13 +1316,23 @@ export function createTacticalViewerApplicationClass({
       return result;
     }
 
-    async setPitchBy(delta, panelIndex = 0) {
+    setPitchBy(delta, panelIndex = 0) {
+      const controller = this.inputControllers[panelIndex];
+      if (controller) {
+        return controller.enqueueAction(() => this.commitPitchBy(delta, panelIndex));
+      }
+      return this.enqueuePanelAction(panelIndex,
+        () => this.commitPitchBy(delta, panelIndex));
+    }
+
+    async commitPitchBy(delta, panelIndex = 0) {
       const selected = this.getSelectedTacticalState(panelIndex);
-      const currentIndex = ALLOWED_PITCHES.indexOf(selected?.pitch);
+      const document = selected ? this.getTokenById(selected.tokenId) : null;
+      const documentPitch = document ? getTokenPitch(document) : selected?.pitch;
+      const currentIndex = ALLOWED_PITCHES.indexOf(documentPitch);
       if (currentIndex < 0) return null;
-      const nextIndex = Math.min(ALLOWED_PITCHES.length - 1,
-        Math.max(0, currentIndex + delta));
-      if (nextIndex === currentIndex) return null;
+      const nextIndex = (currentIndex + delta % ALLOWED_PITCHES.length
+        + ALLOWED_PITCHES.length) % ALLOWED_PITCHES.length;
       return this.setPitchTo(ALLOWED_PITCHES[nextIndex], panelIndex);
     }
 
@@ -1195,6 +1376,22 @@ export function createTacticalViewerApplicationClass({
       return result;
     }
 
+    async deleteSelectedToken(panelIndex = 0) {
+      const selected = this.getSelectedTacticalState(panelIndex);
+      const document = selected ? this.getTokenById(selected.tokenId) : null;
+      const canDelete = selected?.canCurrentUserDelete
+        ?? selected?.canCurrentUserUpdate === true;
+      if (!selected || selected.visibleToCurrentUser !== true || !canDelete
+        || !document || typeof this.tacticalUpdateService?.deleteToken !== "function") {
+        return null;
+      }
+
+      const result = await this.tacticalUpdateService.deleteToken(document);
+      this.handleActionResult(result);
+      if (result?.status === "accepted") this.handleSelectionChanged(null, panelIndex);
+      return result;
+    }
+
     createInputController() {
       return this.createPanelInputController(0);
     }
@@ -1204,6 +1401,7 @@ export function createTacticalViewerApplicationClass({
       if (!canvas || this.inputControllers[index]) return this.inputControllers[index];
       this.inputControllers[index] = new PanelInputController({
         element: canvas,
+        keyboardTarget: this.panelElements[index]?.querySelector?.('[data-role="panel-surface"]'),
         panel: this.viewerState.panels[index],
         projectionEngine: this.projectionEngine,
         getRenderModel: () => this.buildRenderModel(undefined, index),
@@ -1212,13 +1410,17 @@ export function createTacticalViewerApplicationClass({
         tacticalUpdateService: this.tacticalUpdateService,
         getTokenById: (tokenId) => this.getTokenById(tokenId),
         onSelectionChanged: (tokenId) => this.handleSelectionChanged(tokenId, index),
+        onSelectionBoxChanged: (selectionBox) => this.handleSelectionBoxChanged(selectionBox, index),
         onOverlapChooser: (candidates) => this.showOverlapChooser(index, candidates),
         onViewChanged: (change) => this.handlePanelViewChanged(index, change),
         onMovementPreview: (preview) => this.handleMovementPreview(preview),
         onActionResult: (result) => this.handleActionResult(result),
+        onDeleteToken: () => this.deleteSelectedToken(index),
         getSelectedTokenState: () => this.getSelectedTacticalState(index),
-        onHeadingDelta: (delta) => this.setHeadingBy(delta, index),
-        onPitchDelta: (delta) => this.setPitchBy(delta, index),
+        // The controller already serializes shortcut actions. Call the
+        // commit methods here so the public wrappers do not enqueue again.
+        onHeadingDelta: (delta) => this.commitHeadingBy(delta, index),
+        onPitchDelta: (delta) => this.commitPitchBy(delta, index),
         requestRender: (invalidation) => this.requestRender(invalidation)
       });
       return this.inputControllers[index];
@@ -1258,7 +1460,6 @@ export function createTacticalViewerApplicationClass({
       }
       panelCountSelect.value = String(this.viewerState.panelCount);
       panelCountSelect.addEventListener?.("change", () => this.setPanelCount(panelCountSelect.value));
-      toolbar.append(panelCountLabel, panelCountSelect);
 
       const displayModeLabel = this.domDocument.createElement("label");
       displayModeLabel.textContent = localize("viewer.displayMode.label", "Display mode");
@@ -1275,6 +1476,9 @@ export function createTacticalViewerApplicationClass({
       displayModeSelect.addEventListener?.("change", () => this.setDisplayMode(displayModeSelect.value));
       displayModeLabel.appendChild(displayModeSelect);
       toolbar.appendChild(displayModeLabel);
+
+      addClass(panelCountSelect, "tactical-viewer-panel-count");
+      toolbar.append(panelCountLabel, panelCountSelect);
 
       const sharedOptionsButton = makeButton(
         this.domDocument,
@@ -1329,8 +1533,9 @@ export function createTacticalViewerApplicationClass({
         checkbox.setAttribute?.("aria-label", labelText);
         setRole(checkbox, `link-${key}`);
         checkbox.addEventListener?.("change", () => this.setLink(key, checkbox.checked));
-        label.textContent = labelText;
-        label.appendChild(checkbox);
+        const labelTextElement = this.domDocument.createElement("span");
+        labelTextElement.textContent = labelText;
+        label.append(checkbox, labelTextElement);
         sharedOptions.appendChild(label);
         this.linkControls[key] = checkbox;
       }
@@ -1434,6 +1639,7 @@ export function createTacticalViewerApplicationClass({
         const headingIncrease = makeButton(this.domDocument, "+45°", "heading-increase", localize("viewer.heading.increase", "Rotate heading right 45 degrees"));
         const pitchPrevious = makeButton(this.domDocument, "Pitch −", "pitch-previous", localize("viewer.pitch.previous", "Previous pitch"));
         const pitchNext = makeButton(this.domDocument, "Pitch +", "pitch-next", localize("viewer.pitch.next", "Next pitch"));
+        const deleteToken = makeButton(this.domDocument, "Delete", "delete-token", localize("viewer.deleteToken", "Delete selected token"));
         const optionsButton = makeButton(this.domDocument, localize("viewer.options", "Options"), "panel-options", localize("viewer.panelOptions", "Panel options"));
         const options = this.domDocument.createElement("div");
         addClass(options, "tactical-viewer-overlay-options");
@@ -1441,7 +1647,7 @@ export function createTacticalViewerApplicationClass({
         optionsButton.addEventListener?.("click", () => {
           options.hidden = !options.hidden;
         });
-        for (const key of Object.keys(DEFAULT_OVERLAYS).filter((key) => key !== "gridOpacity")) {
+        for (const key of Object.keys(DEFAULT_OVERLAYS).filter((key) => !["gridOpacity", "gridStyle"].includes(key))) {
           const label = this.domDocument.createElement("label");
           const checkbox = this.domDocument.createElement("input");
           checkbox.type = "checkbox";
@@ -1449,8 +1655,9 @@ export function createTacticalViewerApplicationClass({
           setRole(checkbox, `overlay-${key}`);
           checkbox.setAttribute?.("aria-label", `${localize("viewer.overlay." + key, key)} (${index + 1})`);
           checkbox.addEventListener?.("change", () => this.setPanelOverlay(index, key, checkbox.checked));
-          label.textContent = localize("viewer.overlay." + key, key);
-          label.appendChild(checkbox);
+          const labelTextElement = this.domDocument.createElement("span");
+          labelTextElement.textContent = localize("viewer.overlay." + key, key);
+          label.append(checkbox, labelTextElement);
           options.appendChild(label);
         }
         const opacityLabel = this.domDocument.createElement("label");
@@ -1477,6 +1684,23 @@ export function createTacticalViewerApplicationClass({
         });
         opacityLabel.append(opacity, opacityValue);
         options.appendChild(opacityLabel);
+        const gridStyleLabel = this.domDocument.createElement("label");
+        gridStyleLabel.textContent = localize("viewer.gridStyle", "Grid lines");
+        const gridStyle = this.domDocument.createElement("select");
+        setRole(gridStyle, "grid-style");
+        gridStyle.setAttribute?.("aria-label", `${localize("viewer.gridStyle", "Grid lines")} (${index + 1})`);
+        for (const style of GRID_LINE_STYLES) {
+          const option = this.domDocument.createElement("option");
+          option.value = style;
+          option.textContent = localize(`viewer.gridStyle.${style}`, style);
+          gridStyle.appendChild(option);
+        }
+        gridStyle.value = this.viewerState.panels[index].overlays.gridStyle ?? DEFAULT_GRID_STYLE;
+        gridStyle.addEventListener?.("change", () => {
+          void this.setPanelGridStyle(index, gridStyle.value);
+        });
+        gridStyleLabel.appendChild(gridStyle);
+        options.appendChild(gridStyleLabel);
         const tokenSizeLabel = this.domDocument.createElement("span");
         tokenSizeLabel.textContent = localize("viewer.tokenSize", "Selected token size");
         addClass(tokenSizeLabel, "tactical-viewer-token-size-label");
@@ -1523,10 +1747,11 @@ export function createTacticalViewerApplicationClass({
         addClass(headingIncrease, "direction-rotation-increase");
         addClass(pitchPrevious, "direction-pitch-decrease");
         addClass(pitchNext, "direction-pitch-increase");
+        addClass(deleteToken, "direction-delete");
         directionControls.append(
           moveUp, moveLeft, moveRight, moveDown,
           zDecrease, zIncrease, pitchPrevious, pitchNext,
-          headingDecrease, headingIncrease
+          headingDecrease, headingIncrease, deleteToken
         );
         panelToolbar.append(
           panelName, viewSelect, zoomOut, zoomLabel, zoomIn, resetView, centerView,
@@ -1546,7 +1771,7 @@ export function createTacticalViewerApplicationClass({
         ));
         canvas.setAttribute?.("tabindex", "0");
         canvas.tabIndex = 0;
-        canvas.setAttribute?.("aria-keyshortcuts", "ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown [ ] , .");
+        canvas.setAttribute?.("aria-keyshortcuts", "ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown Delete Backspace [ ] , .");
         panelSurface.append(canvas, directionControls);
         panel.append(panelToolbar, panelSurface);
         panelGrid.appendChild(panel);
@@ -1558,28 +1783,34 @@ export function createTacticalViewerApplicationClass({
         zoomIn.addEventListener?.("click", () => controller?.zoomIn());
         resetView.addEventListener?.("click", () => controller?.resetView());
         centerView.addEventListener?.("click", () => controller?.centerView());
-        moveLeft.addEventListener?.("click", () => controller?.handleKeyDown({
-          key: "ArrowLeft", target: moveLeft, preventDefault: () => {}
-        }));
-        moveRight.addEventListener?.("click", () => controller?.handleKeyDown({
-          key: "ArrowRight", target: moveRight, preventDefault: () => {}
-        }));
-        moveUp.addEventListener?.("click", () => controller?.handleKeyDown({
-          key: "ArrowUp", target: moveUp, preventDefault: () => {}
-        }));
-        moveDown.addEventListener?.("click", () => controller?.handleKeyDown({
-          key: "ArrowDown", target: moveDown, preventDefault: () => {}
-        }));
-        zDecrease.addEventListener?.("click", () => controller?.handleKeyDown({
-          key: "PageDown", target: zDecrease, preventDefault: () => {}
-        }));
-        zIncrease.addEventListener?.("click", () => controller?.handleKeyDown({
-          key: "PageUp", target: zIncrease, preventDefault: () => {}
-        }));
-        headingDecrease.addEventListener?.("click", () => this.setHeadingBy(-45, index));
-        headingIncrease.addEventListener?.("click", () => this.setHeadingBy(45, index));
-        pitchPrevious.addEventListener?.("click", () => this.setPitchBy(-1, index));
-        pitchNext.addEventListener?.("click", () => this.setPitchBy(1, index));
+        const moveFromButton = (key) => controller?.enqueueAction(() =>
+          this.enqueuePanelAction(index, () =>
+            controller.moveByKeyboard(controller.keyboardDelta(key))));
+        moveLeft.addEventListener?.("click", () => void moveFromButton("ArrowLeft"));
+        moveRight.addEventListener?.("click", () => void moveFromButton("ArrowRight"));
+        moveUp.addEventListener?.("click", () => void moveFromButton("ArrowUp"));
+        moveDown.addEventListener?.("click", () => void moveFromButton("ArrowDown"));
+        directionControls.addEventListener?.("keydown", (event) => {
+          if (event?.target?.tagName?.toUpperCase?.() !== "BUTTON") return;
+          if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Delete", "Backspace"].includes(event.key)) return;
+          void controller?.handleKeyDown(event);
+        });
+        zDecrease.addEventListener?.("click", () => void moveFromButton("PageDown"));
+        zIncrease.addEventListener?.("click", () => void moveFromButton("PageUp"));
+        const queueControllerAction = (action) => void controller?.enqueueAction(action);
+        headingDecrease.addEventListener?.("click", () => queueControllerAction(
+          () => this.commitHeadingBy(-45, index)
+        ));
+        headingIncrease.addEventListener?.("click", () => queueControllerAction(
+          () => this.commitHeadingBy(45, index)
+        ));
+        pitchPrevious.addEventListener?.("click", () => queueControllerAction(
+          () => this.commitPitchBy(-1, index)
+        ));
+        pitchNext.addEventListener?.("click", () => queueControllerAction(
+          () => this.commitPitchBy(1, index)
+        ));
+        deleteToken.addEventListener?.("click", () => void this.deleteSelectedToken(index));
       }
 
       const columnSplitter = this.domDocument.createElement("div");
@@ -1826,8 +2057,13 @@ export function createTacticalViewerApplicationClass({
           state: this.viewerState,
           panelIndex,
           selectedTokenId: this.getSelectedTokenId(panelIndex),
+          selectionBox: this.viewerState.selectionBox?.panelIndex === panelIndex
+            ? this.viewerState.selectionBox
+            : null,
           devicePixelRatio: this.devicePixelRatio,
           visibleTacticalStates,
+          gridDimensions: this.viewerState.gridDimensions,
+          background: this.viewerState.background,
           invalidation: this.lastInvalidation,
           invalidate: (invalidation) => this.requestRender(invalidation)
         };
